@@ -1,0 +1,17 @@
+{
+  "name": "watering-platform",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/protocol.test.mjs",
+    "test:browser": "node tests/browser.test.cjs",
+    "test:locations": "node tests/browser-locations.test.cjs",
+    "browser:install": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  },
+  "dependencies": {
+    "motion": "^13.3.0"
+  }
+}

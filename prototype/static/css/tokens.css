@@ -1,0 +1,9 @@
+:root {
+  color-scheme: light;
+  --background:#fff; --surface:#f2f2f2; --surface-strong:#ebebeb;
+  --text:#111; --muted:#666; --line:rgba(0,0,0,.1); --line-hover:rgba(0,0,0,.25);
+  --success:#15803d; --success-bg:#f0fdf4; --warning:#92400e; --warning-bg:#fffbeb; --error:#b91c1c; --error-bg:#fef2f2;
+  --focus:#1d9bf0; --sidebar:208px; --content:1120px; --radius:10px;
+  --space-xs:8px; --space-sm:12px; --space-md:16px; --space-lg:24px; --space-xl:32px;
+  --font:system-ui,-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+}

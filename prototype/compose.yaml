@@ -1,0 +1,29 @@
+services:
+  watering:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PUBLIC_PORT:-5000}:5000"
+    environment:
+      APP_ENV: production
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in .env to a strong secret of at least 16 characters}
+      LOCATION_TOKEN_SECRET: ${LOCATION_TOKEN_SECRET:?Set LOCATION_TOKEN_SECRET to a separate random secret}
+      ADMIN_HOSTS: ${ADMIN_HOSTS:?Set ADMIN_HOSTS to the admin subdomain, for example admin.example.com}
+      WEATHER_ENABLED: ${WEATHER_ENABLED:-1}
+      GEOCODING_ENABLED: ${GEOCODING_ENABLED:-1}
+      GEOCODING_BASE_URL: ${GEOCODING_BASE_URL:-https://nominatim.openstreetmap.org/search}
+      GEOCODING_USER_AGENT: ${GEOCODING_USER_AGENT:?Set a geocoding user agent with a real contact address}
+      COUNTRIES_API_URL: ${COUNTRIES_API_URL:-https://raw.githubusercontent.com/mledoze/countries/master/countries.json}
+      CHINA_AREAS_API_URL: ${CHINA_AREAS_API_URL:-https://geo.datav.aliyun.com/areas_v3/bound}
+      CHINA_CITIES_API_URL: ${CHINA_CITIES_API_URL:-https://raw.githubusercontent.com/modood/Administrative-divisions-of-China/master/dist/pca-code.json}
+      WORLD_CITIES_API_URL: ${WORLD_CITIES_API_URL:-https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_populated_places_simple.geojson}
+      TAIWAN_CITIES_API_URL: ${TAIWAN_CITIES_API_URL:-https://raw.githubusercontent.com/donma/TaiwanAddressCityAreaRoadChineseEnglishJSON/master/CityCountyData.json}
+      DEMO_ENABLED: ${DEMO_ENABLED:-0}
+      BLE_SERVICE_UUID: ${BLE_SERVICE_UUID:-}
+      BLE_WRITE_UUID: ${BLE_WRITE_UUID:-}
+      BLE_NOTIFY_UUID: ${BLE_NOTIFY_UUID:-}
+    volumes:
+      - system-data:/app/instance
+
+volumes:
+  system-data:

@@ -1,0 +1,17 @@
+{
+  "url": "/static/assets/models/enclosure.obj",
+  "materials": "/static/assets/models/enclosure.mtl",
+  "format": "obj",
+  "upAxis": "z",
+  "label": "临时外壳模型",
+  "parts": [
+    {"name": "实体1:1", "closed": [-0.25, -11.05, 0], "open": [-0.25, -10.25, 4.8]},
+    {"name": "实体1", "closed": [0, 0, 0], "open": [0, -2.2, 0]}
+  ],
+  "poses": {
+    "home": {"rotation": [0.12, -0.16, 0], "position": [0.25, 0.20], "scale": 1.24, "open": 0},
+    "product": {"rotation": [0.58, -0.57, -0.06], "position": [0.1, 0.22], "scale": 1.17, "open": 0},
+    "configure": {"rotation": [0.55, -0.38, 0], "position": [0, -0.42], "scale": 0.94, "open": 1},
+    "device": {"rotation": [0, 0, 0], "position": [0, 0.03], "scale": 1.32, "open": 0}
+  }
+}

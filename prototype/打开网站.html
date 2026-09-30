@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>打开浇水平台</title>
+  <style>
+    :root { font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif; color: #111; background: #f5f5f3; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 24px; box-sizing: border-box; }
+    main { width: min(100%, 520px); background: #fff; border: 1px solid #deded9; border-radius: 20px; padding: 36px; box-sizing: border-box; }
+    h1 { margin: 0 0 12px; font-size: 28px; }
+    p { color: #5c5c58; line-height: 1.7; }
+    .status { margin: 24px 0; padding: 14px; border-radius: 10px; background: #f3f3f1; color: #333; }
+    .status.error { background: #fff4ed; color: #9a3412; }
+    a { display: inline-block; background: #111; color: #fff; border-radius: 999px; padding: 12px 18px; text-decoration: none; }
+    code { font-family: Consolas, monospace; background: #eee; padding: 2px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>浇水平台</h1>
+    <p>正在检查本机服务，服务正常后会自动打开网页</p>
+    <p id="status" class="status" role="status">正在连接 <code>127.0.0.1:5000</code>…</p>
+    <a id="open" href="http://127.0.0.1:5000/#home" hidden>打开浇水平台</a>
+  </main>
+  <script>
+    const url = 'http://127.0.0.1:5000/#home';
+    const status = document.querySelector('#status');
+    const open = document.querySelector('#open');
+    fetch('http://127.0.0.1:5000/api/settings', { cache: 'no-store' })
+      .then(response => {
+        if (!response.ok) throw new Error('服务响应异常');
+        status.textContent = '服务已就绪，正在打开网站…';
+        open.hidden = false;
+        setTimeout(() => { location.href = url; }, 250);
+      })
+      .catch(() => {
+        status.classList.add('error');
+        status.innerHTML = '服务尚未启动；请先双击 <code>start.bat</code>，保持启动窗口开启，再重新打开此文件';
+        open.hidden = false;
+      });
+  </script>
+</body>
+</html>

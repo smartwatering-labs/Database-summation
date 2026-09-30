@@ -1,0 +1,46 @@
+const {chromium}=require('playwright');
+const assert=require('node:assert/strict');
+(async()=>{
+ const browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_PATH,args:['--enable-unsafe-swiftshader']});
+ try{
+  const page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true});
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const base=process.env.TEST_URL||'http://127.0.0.1:5001';
+  const go=async route=>{await page.evaluate(r=>location.hash=r,route);await page.waitForFunction(r=>{const main=document.querySelector('#main');return main.dataset.route===r&&!main.inert&&!main.classList.contains('content-hidden')&&main.getAnimations().every(a=>a.playState==='finished');},route);};
+  await page.goto(base);await page.getByRole('button',{name:'连接模拟设备',exact:true}).click();
+  await page.locator('#connection-status').filter({hasText:'模拟设备'}).waitFor();
+  await go('configure');
+  await page.getByLabel('国家 / 地区',{exact:true}).fill('中');
+  await page.locator('[data-code="CN"]').click();
+  await page.locator('#place-province option[value="310000"]').waitFor({state:'attached'});
+  await page.getByLabel('省份 / 直辖市',{exact:true}).selectOption('310000');
+  await page.locator('.environment-summary').waitFor();
+  await page.getByRole('button',{name:'分析并生成配置',exact:true}).click();
+  await page.locator('.result-metrics').waitFor();
+  const downloadPromise=page.waitForEvent('download');
+  await page.getByRole('button',{name:'导出 JSON',exact:true}).click();
+  const download=await downloadPromise;assert.equal(download.suggestedFilename(),'watering-config-r1.json');
+  await page.getByRole('button',{name:'发送到模拟设备',exact:true}).click();
+  await page.getByRole('button',{name:'确认',exact:true}).click();await page.locator('.write-status.success').waitFor();
+  await go('device');await page.locator('.device-controls').waitFor();
+  await page.locator('#target-mode').selectOption('PREPARE');
+  await page.getByRole('button',{name:'应用',exact:true}).click();await page.getByRole('button',{name:'确认',exact:true}).click();
+  await page.locator('.device-identity').filter({hasText:'PREPARE'}).waitFor();
+  await page.getByRole('button',{name:'从设备读取',exact:true}).click();
+  await page.getByRole('button',{name:'读取最近一周',exact:true}).click();await page.locator('.history-summary').waitFor();
+  assert.equal(await page.locator('tbody tr').count(),12);
+  await page.getByRole('button',{name:'恢复出厂',exact:true}).click();
+  await page.getByRole('button',{name:'取消',exact:true}).click();assert.ok(await page.locator('.device-controls').isVisible());
+  await go('configure');await page.locator('.result-metrics').waitFor();
+  await page.locator('#config-file').setInputFiles(await download.path());await page.locator('.result-metrics').waitFor();
+  await page.getByRole('button',{name:'查看结构说明'}).click();await page.locator('#detail-dialog[open]').waitFor();
+  await page.keyboard.press('Escape');await page.locator('#detail-dialog').waitFor({state:'hidden'});
+  assert.ok(await page.getByRole('button',{name:'导出 JSON',exact:true}).isEnabled());
+  const admin=await browser.newPage();await admin.goto(base.replace('127.0.0.1','admin.localhost'));
+  await admin.getByLabel('管理员密钥',{exact:true}).fill('6767');
+  await admin.getByRole('button',{name:'进入管理端',exact:true}).click();
+  await admin.locator('.service-status').waitFor();await admin.locator('#formulas').waitFor();
+  assert.deepEqual(errors,[]);
+  console.log('PASS: real Flask configuration generation/export/import, demo BLE upload/readback/mode/history, destructive-action cancellation, detail isolation, separate admin');
+ }finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exit(1);});

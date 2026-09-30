@@ -1,0 +1,32 @@
+/* The single white/blue palette: frosted surfaces, soft elevation, fine edges. */
+:root{
+ --background:#fff;--surface:#f5f5f7;--surface-strong:#ececef;--text:#1d1d1f;--muted:#86868b;
+ --accent:#0066cc;--accent-dark:#005bb5;--accent-soft:#f0f6fc;--focus:#0066cc;
+ --line:rgba(29,29,31,.12);--line-hover:rgba(29,29,31,.2);
+ --panel-fill:rgba(245,247,250,.92);--card-fill:rgba(255,255,255,.58);
+ --panel-shadow:0 18px 48px rgba(29,29,31,.1),0 3px 10px rgba(29,29,31,.04),inset 0 1px 0 rgba(255,255,255,.95);
+ --control-shadow:0 3px 8px rgba(29,29,31,.07),0 1px 2px rgba(29,29,31,.04),inset 0 1px 0 rgba(255,255,255,.9);
+}
+.topline{background:#fff;border-color:transparent}
+:is(.hero-copy p,.hero-copy h1 .muted,.hero-product-heading p,.hero-footer,.workspace-label){color:var(--muted)}
+.hero-hotspots .disclosure-button{color:var(--text);background:rgba(246,248,250,.9);border-color:var(--line);box-shadow:0 6px 20px rgba(29,29,31,.09),var(--control-shadow)}
+.hero-hotspots .disclosure-button::before{box-shadow:none}
+.button.primary{background:var(--accent);box-shadow:0 4px 10px rgba(0,102,204,.2),0 1px 2px rgba(29,29,31,.08),inset 0 1px 0 rgba(255,255,255,.16)}
+.button.primary:hover:not(:disabled){background:var(--accent-dark);box-shadow:0 6px 16px rgba(0,102,204,.24),inset 0 1px 0 rgba(255,255,255,.16)}
+:is(.button.secondary,.button.outline,.workspace-caption .disclosure-button,.panel-toggle,.button.icon-button){background:rgba(250,251,252,.94)!important;border-color:var(--line);box-shadow:var(--control-shadow)}
+:is(.actions,.hero-footer) .button.ghost{background:rgba(250,251,252,.94);border-color:var(--line);box-shadow:var(--control-shadow);padding-inline:18px}
+:is(.button.secondary,.button.outline,.button.ghost):hover:not(:disabled){background:#f0f2f5!important}
+/* Workspace frosting uses the model's shared blur timeline, avoiding a second moving blur surface. */
+.workspace-panel{background:var(--panel-fill);border-color:rgba(29,29,31,.1);box-shadow:var(--panel-shadow)}
+.workspace-panel :is(.settings-group,.configuration-result,.device-identity,.device-empty,.environment-summary){background:var(--card-fill);border:1px solid var(--line);box-shadow:inset 0 1px 0 rgba(255,255,255,.85)}
+.workspace-panel :is(.configuration-result,.device-identity,.device-empty){box-shadow:0 3px 12px rgba(29,29,31,.035),inset 0 1px 0 rgba(255,255,255,.9)}
+.workspace-panel .field-row+.field-row{border-top-color:var(--line)}
+.workspace-panel :is(input,select,textarea){background:rgba(255,255,255,.88);border-color:rgba(29,29,31,.1)}
+.workspace-panel .field-row:focus-within{background:rgba(255,255,255,.72);box-shadow:inset 2px 0 var(--accent)}
+.workspace-panel .country-options{background:#fff;border-color:var(--line);box-shadow:0 8px 24px rgba(29,29,31,.09)}
+.nav-hover-indicator{background:#f5f5f7;box-shadow:none}
+@media(max-width:767px){.nav-link[aria-current=page]{background:#f5f5f7;box-shadow:none}}
+.sidebar-toggle{border-color:var(--line);background:#fafbfc;box-shadow:var(--control-shadow)}
+.panel-scroll{scrollbar-color:#c6c6cb transparent}
+dialog{background:rgba(246,247,249,.9)!important;border-color:rgba(255,255,255,.92)!important;box-shadow:0 28px 80px rgba(29,29,31,.17),0 6px 20px rgba(29,29,31,.08),inset 0 1px 0 #fff!important;backdrop-filter:blur(28px) saturate(115%)}
+.mobile-header{background:rgba(255,255,255,.96);border-color:var(--line)}

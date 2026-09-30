@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="minimal">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="ESP32-C3 智能浇水系统：连接设备、生成个性化配置与查看近期数据">
+  <title>浇水 · 设备与种植管理</title>
+  <link rel="icon" href="/static/assets/icon.svg" type="image/svg+xml">
+  <link rel="preload" href="/static/assets/fonts/roboto-flex-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="stylesheet" href="/static/css/industrial.css">
+  <link rel="stylesheet" href="/static/css/theme-minimal.css">
+  <script type="module" src="/static/js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <header class="mobile-header"><a class="brand wordmark variable-proximity" href="#home" aria-label="Smart Watering System"><span class="variable-proximity-line" aria-hidden="true">Smart</span><span class="variable-proximity-line" aria-hidden="true">Watering</span><span class="variable-proximity-line" aria-hidden="true">System</span></a><button class="button ghost icon-button" id="menu-toggle" aria-label="打开导航" aria-expanded="false" aria-controls="sidebar">☰</button></header>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand desktop-brand wordmark variable-proximity" href="#home" aria-label="Smart Watering System"><span class="variable-proximity-line" aria-hidden="true">Smart</span><span class="variable-proximity-line" aria-hidden="true">Watering</span><span class="variable-proximity-line" aria-hidden="true">System</span></a>
+    <nav aria-label="主导航" id="navigation"></nav>
+    <div class="sidebar-bottom"><div id="sidebar-connection" class="muted small">尚未连接设备</div><button class="button outline" data-action="connect">连接设备</button><span class="muted caption">ESP32-C3 · 配置平台</span></div>
+  </aside>
+  <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="收起侧边栏" aria-expanded="true" aria-controls="sidebar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button>
+  <div class="main-shell"><div class="topline"><span id="breadcrumb">控制台 / 首页</span><span id="connection-status" role="status">未连接</span></div><div id="model-stage" aria-hidden="true"><div class="model-ground"></div><canvas id="model-canvas"></canvas><img class="model-fallback" src="/static/assets/controller.png" alt=""></div><main id="main" tabindex="-1"><div class="empty-state"><h1>正在准备工作区</h1><p>读取植物与地点知识库…</p></div></main></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="detail-dialog" aria-labelledby="detail-title"><div class="detail-heading"><span class="mono">SMART WATERING SYSTEM</span><button type="button" class="button icon-button" data-detail-close aria-label="关闭详情">×</button></div><h2 id="detail-title"></h2><div id="detail-body"></div></dialog>
+  <dialog id="dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+  <noscript>此应用需要启用 JavaScript 才能进行配置和蓝牙连接</noscript>
+</body>
+</html>
+
