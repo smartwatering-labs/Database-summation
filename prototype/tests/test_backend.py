@@ -4,6 +4,7 @@ import math
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -69,6 +70,41 @@ class BackendTests(unittest.TestCase):
         self.assertGreater(len(data['explanations']), 3)
         self.assertGreater(len(data['warnings']), 1)
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
+
+    def test_bound_configuration_has_executable_interval_and_preserves_legacy_format(self):
+        legacy = self.generate().json['config']
+        self.assertEqual(legacy['configVersion'], '1.0')
+        self.assertNotIn('minWaterIntervalSeconds', legacy['params'])
+        response = self.generate(configVersion='2.0', targetDeviceId='C3-012345abcdef')
+        self.assertEqual(response.status_code, 200)
+        config = response.json['config']
+        self.assertEqual(config['configVersion'], '2.0')
+        self.assertEqual(config['targetDeviceId'], 'C3-012345abcdef')
+        self.assertEqual(config['params']['minWaterIntervalSeconds'], config['display']['estimatedIntervalDays'] * 86400)
+        self.assertEqual(validate_config(config)['params']['minWaterIntervalSeconds'], config['params']['minWaterIntervalSeconds'])
+        self.assertEqual(self.generate(configVersion='2.0').status_code, 400)
+        self.assertEqual(self.generate(configVersion='2.0', targetDeviceId='../other').status_code, 400)
+        invalid = config | {'params': config['params'] | {'minWaterIntervalSeconds': 3599}}
+        with self.assertRaises(ValidationError):
+            validate_config(invalid)
+
+    def test_device_summary_requires_fresh_calibrated_bound_prepare_data(self):
+        report={'deviceId':'C3-012345abcdef','calibrationReady':True,'complete':True,'timeQuality':'trusted',
+                'validSamples':100,'totalSamples':110,'durationSeconds':600,'configRevision':7,
+                'temperatureC':35,'humidityPct':30,'flowRateMlSec':20,'finishedAt':int(datetime.now(timezone.utc).timestamp())}
+        arguments={'configVersion':'2.0','targetDeviceId':report['deviceId'],'currentRevision':7}
+        regional=self.generate(**arguments).json
+        response=self.generate(**arguments,deviceObservation=report)
+        self.assertEqual(response.status_code,200,response.json)
+        self.assertEqual(response.json['source'],'device-summary+api')
+        self.assertGreater(response.json['config']['waterNeedMlDay'],regional['config']['waterNeedMlDay'])
+        self.assertEqual(response.json['environment']['temperatureC'],25)
+        self.assertEqual(response.json['config']['display']['flowRateMlSec'],20)
+        for change in ({'calibrationReady':False},{'complete':False},{'timeQuality':'relative'},
+                       {'configRevision':6},{'deviceId':'OTHER'},{'totalSamples':200},
+                       {'finishedAt':report['finishedAt']-3601},{'durationSeconds':599}):
+            self.assertEqual(self.generate(**arguments,deviceObservation=report|change).status_code,400)
+        self.assertEqual(self.generate(deviceObservation=report).status_code,400)
 
     def test_scene_changes_affect_recommendation(self):
         shade = self.generate(light='shade').json['config']
@@ -231,11 +267,103 @@ class BackendTests(unittest.TestCase):
         base_url='http://admin.localhost'
         library=self.client.get('/api/admin/libraries/plants',headers=headers,base_url=base_url).json
         plant=dict(library['items'][0]); plant['dailyMl'] += 1
-        saved=self.client.put('/api/admin/libraries/plants',headers=headers,base_url=base_url,json={'expectedRevision':library['revision'],'plant':plant}).json
+        response=self.client.put('/api/admin/libraries/plants',headers=headers,base_url=base_url,json={'expectedRevision':library['revision'],'plant':plant})
+        self.assertEqual(response.status_code,200,response.json)
+        saved=response.json
         self.assertEqual(saved['revision'], library['revision'] + 1)
         stale=self.client.put('/api/admin/libraries/plants',headers=headers,base_url=base_url,json={'expectedRevision':library['revision'],'plant':plant})
         self.assertEqual(stale.status_code,409)
         self.assertEqual(self.client.get('/api/admin/git/status',headers=headers,base_url=base_url).status_code,200)
+
+    def test_plant_review_and_field_validation_require_evidence(self):
+        headers={'Authorization':'Bearer test-secret'}
+        base_url='http://admin.localhost'
+        library=self.client.get('/api/admin/libraries/plants',headers=headers,base_url=base_url).json
+        plant=dict(library['items'][0])
+        self.assertEqual(plant['review']['status'],'engineering')
+        self.assertEqual(plant['fieldValidation']['status'],'untested')
+        plant['review']={**plant['review'],'status':'reviewed'}
+        payload={'expectedRevision':library['revision'],'plant':plant}
+        self.assertEqual(self.client.put('/api/admin/libraries/plants',headers=headers,base_url=base_url,json=payload).status_code,400)
+        plant['evidence']={**plant['evidence'],'title':'试验资料','reference':'https://example.org/record'}
+        plant['review']['reviewedAt']='2026-10-13'
+        plant['fieldValidation']={**plant['fieldValidation'],'status':'calibrated','testedAt':'2026-10-13','summary':'已完成指定条件下的流量实测'}
+        plant['suitability']={**plant['suitability'],'temperatureMinC':20,'temperatureMaxC':24,'humidityMinPct':50,'humidityMaxPct':55}
+        response=self.client.put('/api/admin/libraries/plants',headers=headers,base_url=base_url,json=payload)
+        self.assertEqual(response.status_code,200,response.json)
+        saved=response.json
+        self.assertEqual(saved['items'][0]['review']['status'],'reviewed')
+        self.assertEqual(saved['items'][0]['fieldValidation']['status'],'calibrated')
+        generated=self.generate().json
+        self.assertEqual(generated['plantBasis']['reviewStatus'],'reviewed')
+        bound=self.generate(configVersion='2.0',targetDeviceId='C3-012345abcdef').json['config']
+        self.assertEqual(bound['environmentReference']['temperatureMinC'],20)
+        self.assertEqual(bound['environmentReference']['temperatureMaxC'],24)
+        self.assertEqual(generated['plantFit']['temperature'],'outside')
+        self.assertEqual(generated['plantFit']['humidity'],'outside')
+        observed={'temperatureC':22,'humidityPct':53,'observedAt':datetime.now(timezone.utc).isoformat()}
+        onsite=self.generate(onsiteObservation=observed).json
+        self.assertEqual(onsite['onsiteFit']['temperature'],'within')
+        self.assertEqual(onsite['onsiteFit']['humidity'],'within')
+        self.assertEqual(onsite['plantFit']['temperature'],'outside')
+        self.assertEqual(self.generate(onsiteObservation={**observed,'observedAt':
+            (datetime.now(timezone.utc)-timedelta(days=2)).isoformat()}).json['onsiteFit']['temperature'],'unavailable')
+        self.assertEqual(self.generate(onsiteObservation={**observed,'observedAt':'2026-10-13T12:00:00'}).status_code,400)
+        self.assertEqual(self.generate(siteType='indoor').json['plantFit']['temperature'],'unavailable')
+        retired=dict(saved['items'][0]); retired['review']={**retired['review'],'status':'retired'}
+        response=self.client.put('/api/admin/libraries/plants',headers=headers,base_url=base_url,json={'expectedRevision':saved['revision'],'plant':retired})
+        self.assertEqual(response.status_code,200,response.json)
+        self.assertEqual(self.generate().status_code,400)
+
+    def test_legacy_plant_document_is_upgraded_once(self):
+        with sqlite3.connect(self.db) as db:
+            row=db.execute("SELECT revision,data FROM library_documents WHERE name='plants'").fetchone()
+            document=json.loads(row[1]); document.pop('schemaVersion')
+            for item in document['items']:
+                item.pop('evidence');item.pop('review');item.pop('fieldValidation');item.pop('suitability')
+            db.execute("UPDATE library_documents SET data=? WHERE name='plants'",(json.dumps(document),))
+        db.close()
+        create_app({'TESTING':True,'DATABASE':self.db})
+        with sqlite3.connect(self.db) as db:
+            upgraded=db.execute("SELECT revision,data FROM library_documents WHERE name='plants'").fetchone()
+        db.close()
+        self.assertEqual(upgraded[0],row[0]+1)
+        self.assertEqual(json.loads(upgraded[1])['items'][0]['review']['status'],'engineering')
+        create_app({'TESTING':True,'DATABASE':self.db})
+        with sqlite3.connect(self.db) as db:
+            self.assertEqual(db.execute("SELECT revision FROM library_documents WHERE name='plants'").fetchone()[0],upgraded[0])
+        db.close()
+
+    def test_qualitative_sources_migrate_without_approving_engineering_numbers(self):
+        with sqlite3.connect(self.db) as db:
+            row=db.execute("SELECT revision,data FROM library_documents WHERE name='plants'").fetchone()
+            document=json.loads(row[1]);document['schemaVersion']=2
+            for item in document['items']:
+                item['evidence']={'title':'','reference':'','referenceDate':'','conditions':'',
+                                  'cultivar':'','growthStage':'','medium':'','numericBasis':''}
+            db.execute("UPDATE library_documents SET data=? WHERE name='plants'",(json.dumps(document),))
+        db.close()
+        create_app({'TESTING':True,'DATABASE':self.db})
+        with sqlite3.connect(self.db) as db:
+            updated=json.loads(db.execute("SELECT data FROM library_documents WHERE name='plants'").fetchone()[0])
+        db.close()
+        self.assertEqual(updated['schemaVersion'],3)
+        self.assertTrue(all(item['evidence']['reference'].startswith('https://') for item in updated['items']))
+        self.assertTrue(all(item['review']['status']=='engineering' for item in updated['items']))
+        self.assertTrue(all('工程参数' in item['evidence']['numericBasis'] for item in updated['items']))
+
+    def test_source_migration_preserves_partial_admin_evidence(self):
+        from engine.plant_library import upgrade_plant_document
+        document=self.client.get('/api/plants').json
+        document['schemaVersion']=2
+        plant=document['items'][0]
+        plant['evidence']={'title':'管理员正在核对的资料','reference':'','referenceDate':'',
+                           'conditions':'本地温室','cultivar':'本地品种','growthStage':'',
+                           'medium':'','numericBasis':''}
+        original=dict(plant['evidence'])
+        updated,changed=upgrade_plant_document(document)
+        self.assertTrue(changed)
+        self.assertEqual(updated['items'][0]['evidence'],original)
 
 
 if __name__ == '__main__':

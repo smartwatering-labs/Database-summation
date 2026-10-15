@@ -3,13 +3,14 @@
 import { modelStage } from './model-stage.js';
 const main=document.querySelector('#main'),stage=document.querySelector('#model-stage');
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
-let value={reveal:1,panel:1},workspace=false,page='home',panelTarget=1;
+let value={reveal:1,panel:1,exitBlur:0},workspace=false,page='home',panelTarget=1,exitSnapshot;
 let frame=0,finish,pendingTarget;
 function paint(){
  main.style.opacity=value.reveal;
  main.style.filter=value.reveal===1?'none':`blur(${(1-value.reveal)*9}px)`;
  main.style.setProperty('--panel-open',value.panel);
- stage.style.filter=`blur(${workspace?8*value.reveal*value.panel:0}px)`;
+ const blur=Math.max(value.exitBlur,workspace?8*value.reveal*value.panel:0);
+ stage.style.filter=blur<.001?'none':`blur(${blur}px)`;
  main.dataset.reveal=value.reveal.toFixed(4);
  main.dataset.panelOpen=value.panel.toFixed(4);
 }
@@ -40,10 +41,31 @@ function bind(){
  }
  paint();
 }
+function captureExit(){
+ exitSnapshot?.remove();
+ const box=main.getBoundingClientRect(),snapshot=main.cloneNode(true);
+ snapshot.removeAttribute('id');snapshot.querySelectorAll('[id]').forEach(node=>node.removeAttribute('id'));
+ snapshot.classList.add('page-exit-snapshot');snapshot.inert=true;snapshot.setAttribute('aria-hidden','true');
+ Object.assign(snapshot.style,{position:'fixed',left:`${box.left}px`,top:`${box.top}px`,width:`${box.width}px`,height:`${box.height}px`,margin:'0',pointerEvents:'none'});
+ snapshot.style.setProperty('width',`${box.width}px`,'important');
+ const originals=main.querySelectorAll('input,select,textarea'),copies=snapshot.querySelectorAll('input,select,textarea');
+ originals.forEach((node,i)=>{copies[i].value=node.value;if('checked' in node)copies[i].checked=node.checked;});
+ document.body.append(snapshot);const scroll=main.querySelector('.panel-scroll');
+ if(scroll)snapshot.querySelector('.panel-scroll').scrollTop=scroll.scrollTop;
+ exitSnapshot=snapshot;
+ const clean=()=>{snapshot.remove();if(exitSnapshot===snapshot)exitSnapshot=null;};
+ snapshot.animate([{opacity:value.reveal,filter:main.style.filter},{opacity:0,filter:'blur(6px)'}],{duration:120,easing:'cubic-bezier(.2,.7,.3,1)',fill:'forwards'}).finished.then(clean,clean);
+}
 export const surfaceMotion={
- hide(){return animate({reveal:0},90);},
- setPage(next){cancel();page=next;workspace=['configure','device'].includes(next);panelTarget=1;value.panel=1;main.classList.remove('model-view');paint();},
- reveal(animated=true){return animate({reveal:1},animated?180:0);},
+ hide(){return animate({reveal:0},70);},
+ setPage(next,animated=false){
+  if(animated)captureExit();else{exitSnapshot?.remove();exitSnapshot=null;}
+  const previousBlur=Math.max(value.exitBlur,workspace?8*value.reveal*value.panel:0);
+  cancel();page=next;workspace=['configure','device'].includes(next);panelTarget=1;value.panel=1;
+  value.reveal=animated?0:1;value.exitBlur=animated?previousBlur:0;main.classList.remove('model-view');paint();
+  if(animated)animate({exitBlur:0},120);
+ },
+ reveal(animated=true){return animate({reveal:1},animated?150:0);},
  bind,
  toggle(){panelTarget=panelTarget?0:1;modelStage.setInteractive(!panelTarget);bind();return animate({panel:panelTarget},440);}
 };
@@ -60,7 +82,7 @@ document.addEventListener('pointerup',e=>{
 });
 document.addEventListener('click',e=>{
  if(!e.target.closest('[data-panel-toggle]')||main.inert)return;
- if(e.detail&&performance.now()-lastTouchToggle<700)return;
+ if(lastTouchToggle&&e.detail&&performance.now()-lastTouchToggle<700)return;
  surfaceMotion.toggle();
 });
 reduced.addEventListener('change',()=>{if(reduced.matches&&frame){value={...pendingTarget};cancel();paint();main.dataset.surfaceMoving='false';}});

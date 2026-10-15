@@ -4,11 +4,15 @@
 #include <U8g2lib.h>
 #include <Wire.h>
 #include <mbedtls/sha256.h>
+#include <mbedtls/md.h>
 #include <atomic>
 #include <deque>
 #include <vector>
 #include "include/board_config.h"
 #include "include/sws_core.h"
+#include "include/board_runtime.h"
+
+BoardRuntime boardRuntime;
 
 #if SWS_OLED_VARIANT == 0
 U8G2_SSD1306_72X40_ER_F_HW_I2C display(U8G2_R0,U8X8_PIN_NONE,SWS_OLED_SCL,SWS_OLED_SDA);
@@ -23,6 +27,7 @@ U8G2_SH1106_128X64_NONAME_F_HW_I2C display(U8G2_R0,U8X8_PIN_NONE,SWS_OLED_SCL,SW
 NimBLEServer* server=nullptr;
 NimBLECharacteristic* notifier=nullptr;
 std::atomic<bool> linked{false},subscribed{false},rxOverflow{false};
+std::atomic<bool> immediateStop{false};
 std::atomic<uint32_t> epoch{0};
 std::atomic<uint16_t> peer{BLE_HS_CONN_HANDLE_NONE};
 struct RxChunk {uint32_t epoch;uint16_t size;uint8_t bytes[244];};
@@ -32,12 +37,59 @@ size_t txOffset=0,txBytes=0,rxCount=0,rxTotal=0;
 uint32_t lastEpoch=0,nextTx=0,txBlockedAt=0,stageAt=0,savedAt=0,lastDisplay=0,rebootAt=0;
 bool oledReady=false,rebootPending=false,hasSavedNotice=false;
 std::string stage="idle";
+size_t peerChunkBytes(){
+  uint16_t mtu=server?server->getPeerMTU(peer.load()):23;
+  return mtu>=23?std::min<size_t>(244,mtu-3):20;
+}
 
 class Hardware : public sws::Platform {
   Preferences prefs;
+  Preferences identity;
+  std::string key;
+  std::string operatorKey,viewerKey;
+  std::string deviceIdentity;
   bool ready=false;
 public:
-  void begin(){ready=prefs.begin("watercfg",false);}
+  static bool validKey(const std::string& value){return value.size()==64&&value.find_first_not_of("0123456789abcdef")==std::string::npos;}
+  void begin(){ready=prefs.begin("watercfg",false);if(identity.begin("waterauth",false)){
+      key=identity.getString("key").c_str();operatorKey=identity.getString("operator").c_str();viewerKey=identity.getString("viewer").c_str();}
+    if(!validKey(key))key.clear();if(!validKey(operatorKey))operatorKey.clear();if(!validKey(viewerKey))viewerKey.clear();}
+  const char* authProfile()override{return key.empty()?"development":"hmac-sha256-v1";}
+  bool hasRole(const std::string& role)override{return role=="owner"?!key.empty():role=="operator"?!operatorKey.empty():role=="viewer"?!viewerKey.empty():false;}
+  void setIdentity(const std::string& id){deviceIdentity=id;}
+  std::string secureMac(const std::string& message)override{
+    return secureMacForRole(message,"owner");
+  }
+  std::string secureMacForRole(const std::string& message,const std::string& role)override{
+    const std::string& selected=role=="operator"?operatorKey:role=="viewer"?viewerKey:key;
+    if(!validKey(selected)||!hasRole(role))return "";unsigned char secret[32],digest[32];char result[65];
+    for(int i=0;i<32;i++)secret[i]=strtoul(selected.substr(i*2,2).c_str(),nullptr,16);
+    auto* info=mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if(!info||mbedtls_md_hmac(info,secret,sizeof(secret),reinterpret_cast<const unsigned char*>(message.data()),message.size(),digest)!=0)return "";
+    for(int i=0;i<32;i++)snprintf(result+i*2,3,"%02x",digest[i]);return result;
+  }
+  bool provision(const std::string& line){
+    if(line=="IDENTITY"){Serial.printf("IDENTITY %s %s\n",deviceIdentity.c_str(),authProfile());return true;}
+    if(line.rfind("AUTHSTATUS ",0)==0){std::string role=line.substr(11);
+      if(role!="owner"&&role!="operator"&&role!="viewer")Serial.println("AUTH_INVALID");
+      else Serial.printf("AUTHSTATUS %s %d\n",role.c_str(),hasRole(role)?1:0);
+      return true;}
+    if(line.rfind("AUTHREVOKE ",0)==0){
+      std::string role=line.substr(11);
+      if(role!="viewer"&&role!="operator"){Serial.println("AUTH_INVALID");return true;}
+      if(!identity.remove(role.c_str())){Serial.println("AUTH_SAVE_FAILED");return true;}
+      if(role=="viewer")viewerKey.clear();else operatorKey.clear();Serial.println("AUTH_REVOKED");return true;
+    }
+    if(line.rfind("AUTH ",0)!=0)return false;
+    std::string candidate=line.substr(5),role="owner";size_t split=candidate.find(' ');
+    if(split!=std::string::npos){role=candidate.substr(0,split);candidate=candidate.substr(split+1);}
+    if((role!="owner"&&role!="operator"&&role!="viewer")||!validKey(candidate)||
+       (role!="owner"&&key.empty())){Serial.println("AUTH_INVALID");return true;}
+    const char* storage=role=="owner"?"key":role.c_str();
+    if(identity.putString(storage,candidate.c_str())!=candidate.size()||identity.getString(storage).c_str()!=candidate){Serial.println("AUTH_SAVE_FAILED");return true;}
+    if(role=="owner")key=candidate;else if(role=="operator")operatorKey=candidate;else viewerKey=candidate;
+    Serial.println("AUTH_PROVISIONED");return true;
+  }
   uint32_t now() override{return millis();}
   std::string randomToken() override {char out[33];for(int i=0;i<16;i++)snprintf(out+2*i,3,"%02x",uint8_t(esp_random()));return out;}
   std::string hash(const std::string& nonce) override {
@@ -65,7 +117,7 @@ public:
     if(prefs.putBytes("package",bytes.data(),bytes.size())!=bytes.size())return false;
     std::string readback;return load(readback)&&readback==raw;
   }
-  bool erase() override {return ready&&prefs.clear()&&prefs.getBytesLength("package")==0;}
+  bool erase() override {return boardRuntime.erase()&&ready&&prefs.clear()&&prefs.getBytesLength("package")==0;}
   bool storageReady() override{return ready;}
   void event(const char* value) override {
     stage=value;stageAt=millis();
@@ -74,6 +126,15 @@ public:
     Serial.printf("SWS stage=%s\n",value);
   }
   void rebootAfterReply() override {rebootPending=true;rebootAt=millis();}
+  void describe(JsonObject out)override{boardRuntime.describe(out);out["transport"]["writeChunkBytes"]=peerChunkBytes();}
+  void runtimeStatus(JsonObject out)override{boardRuntime.status(out);}
+  std::string runtimeMode(const std::string&)override{return boardRuntime.mode();}
+  bool modeAllowed(const std::string& mode)override{return boardRuntime.modeAllowed(mode);}
+  bool changeMode(const std::string& mode)override{return boardRuntime.changeMode(mode);}
+  bool canConfigure()override{return !boardRuntime.active();}
+  void configurationChanged(JsonVariantConst c)override{boardRuntime.configure(c);}
+  int runtimeRequest(const std::string& action,JsonVariantConst p,JsonObject out,std::string& error)override{return boardRuntime.request(action,p,out,error);}
+  void beforeReset()override{boardRuntime.shutdown();}
 } hardware;
 sws::Receiver receiver;
 sws::Endpoint* endpoint=nullptr;
@@ -89,7 +150,7 @@ void queueReply(JsonVariantConst message){
 }
 void sendNext(uint32_t now){
   if(tx.empty()||!linked.load()||!subscribed.load()||int32_t(now-nextTx)<0)return;
-  auto& front=tx.front();size_t length=std::min<size_t>(20,front.size()-txOffset);
+  auto& front=tx.front();size_t length=std::min(peerChunkBytes(),front.size()-txOffset);
   bool ok=notifier->notify(reinterpret_cast<const uint8_t*>(front.data()+txOffset),length,peer.load());
   nextTx=now+10;
   if(!ok){if(!txBlockedAt)txBlockedAt=now;else if(uint32_t(now-txBlockedAt)>3000){clearTx();terminateLink();}return;}
@@ -118,6 +179,7 @@ void drawDisplay(uint32_t now){
       second=labels[page-4];auto value=c["display"][keys[page-4]];
       if(value.isNull())third="--";else {snprintf(text,sizeof(text),"%.1f",value.as<double>());third=text;}
     }
+  } else if(boardRuntime.displayRows(second,third)) {
   } else {second=linked.load()?(endpoint->authorized()?"等待数据包":"等待认证"):"等待网页连接";
     snprintf(text,sizeof(text),"R%lu",static_cast<unsigned long>(endpoint->revision()));third=text;}
   if(!second.empty()&&static_cast<uint8_t>(second[0])<128)display.setFont(u8g2_font_5x7_tf);
@@ -149,6 +211,7 @@ class WriteCallbacks : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c,NimBLEConnInfo& info) override {
     if(info.getConnHandle()!=peer.load()||!subscribed.load())return;
     auto value=c->getValue();RxChunk chunk{};
+    if(value.size()==1&&value[0]=='!'){immediateStop=true;return;}
     if(value.size()>sizeof(chunk.bytes)){rxOverflow=true;return;}
     chunk.epoch=epoch.load();chunk.size=value.size();memcpy(chunk.bytes,value.data(),chunk.size);
     if(xQueueSend(rxQueue,&chunk,0)!=pdTRUE)rxOverflow=true;
@@ -157,10 +220,16 @@ class WriteCallbacks : public NimBLECharacteristicCallbacks {
 ServerCallbacks serverCallbacks;NotifyCallbacks notifyCallbacks;WriteCallbacks writeCallbacks;
 
 void setup(){
+  digitalWrite(SWS_PUMP_PIN,LOW);pinMode(SWS_PUMP_PIN,OUTPUT);
+  digitalWrite(SWS_SENSOR_POWER_PIN,LOW);pinMode(SWS_SENSOR_POWER_PIN,OUTPUT);
   Serial.begin(115200);hardware.begin();
   char id[24];uint64_t mac=ESP.getEfuseMac();snprintf(id,sizeof(id),"C3-%04x%08lx",uint16_t(mac>>32),static_cast<unsigned long>(mac&0xffffffff));
+  hardware.setIdentity(id);
+  boardRuntime.begin(id);
   endpoint=new sws::Endpoint(hardware,id);
+  boardRuntime.provision=[](const std::string& line){bool handled=hardware.provision(line);if(handled&&(line.rfind("AUTH ",0)==0||line.rfind("AUTHREVOKE ",0)==0)){endpoint->resetSession();terminateLink();}return handled;};
   if(!endpoint->restore())hardware.event("error");
+  boardRuntime.configure(endpoint->configuration(),true);
   endpoint->emit=queueReply;
   receiver.onMessage=[](JsonVariantConst m){rxCount=rxTotal=0;endpoint->handle(m);};
   receiver.onError=[](const std::string& id,const char* error){rxCount=rxTotal=0;endpoint->error(id,error);};
@@ -170,23 +239,35 @@ void setup(){
   if(oledReady){display.setI2CAddress(SWS_OLED_ADDRESS<<1);display.begin();display.setBusClock(400000);}
   Serial.printf("SWS %s device=%s OLED=%s I2C=%d/%d address=0x%02x\n",sws::FW_VERSION,id,oledReady?"found":"missing",SWS_OLED_SDA,SWS_OLED_SCL,SWS_OLED_ADDRESS);
   rxQueue=xQueueCreate(64,sizeof(RxChunk));if(!rxQueue){hardware.event("error");return;}
-  NimBLEDevice::init("SWS-ESP32C3");server=NimBLEDevice::createServer();server->setCallbacks(&serverCallbacks,false);
+  if(!NimBLEDevice::init("SWS-ESP32C3")){Serial.println("BLE_INIT_FAILED");hardware.event("error");return;}
+  if(std::string(hardware.authProfile())=="hmac-sha256-v1"){
+    NimBLEDevice::setSecurityAuth(true,false,true);
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
+  }
+  server=NimBLEDevice::createServer();server->setCallbacks(&serverCallbacks,false);
   auto* service=server->createService(SWS_SERVICE_UUID);
-  auto* writer=service->createCharacteristic(SWS_WRITE_UUID,NIMBLE_PROPERTY::WRITE);writer->setCallbacks(&writeCallbacks);
+  auto* writer=service->createCharacteristic(SWS_WRITE_UUID,std::string(hardware.authProfile())=="hmac-sha256-v1"?
+    NIMBLE_PROPERTY::WRITE|NIMBLE_PROPERTY::WRITE_ENC:NIMBLE_PROPERTY::WRITE);writer->setCallbacks(&writeCallbacks);
   notifier=service->createCharacteristic(SWS_NOTIFY_UUID,NIMBLE_PROPERTY::NOTIFY);notifier->setCallbacks(&notifyCallbacks);
-  service->start();auto* advertising=NimBLEDevice::getAdvertising();advertising->addServiceUUID(SWS_SERVICE_UUID);
-  advertising->enableScanResponse(true);advertising->setName("SWS-ESP32C3");advertising->start();
+  server->start();auto* advertising=NimBLEDevice::getAdvertising();advertising->addServiceUUID(SWS_SERVICE_UUID);
+  advertising->enableScanResponse(true);advertising->setName("SWS-ESP32C3");
+  Serial.println(advertising->start()?"BLE_READY SWS-ESP32C3":"BLE_ADVERTISING_FAILED");
 }
 void loop(){
   uint32_t now=millis(),currentEpoch=epoch.load();
   if(currentEpoch!=lastEpoch){lastEpoch=currentEpoch;receiver.reset();endpoint->resetSession();clearTx();rxCount=rxTotal=0;
     hardware.event(linked.load()?"connected":"disconnected");if(!linked.load()&&server&&!rebootPending)NimBLEDevice::startAdvertising();}
   if(rxOverflow.exchange(false)){receiver.reset();clearTx();rxCount=rxTotal=0;hardware.event("error");terminateLink();}
+  if(immediateStop.exchange(false)){
+    boardRuntime.shutdown();receiver.reset();endpoint->resetSession();clearTx();rxCount=rxTotal=0;if(rxQueue)xQueueReset(rxQueue);
+    JsonDocument reply;reply["id"]="emergency-stop";reply["protocol"]=sws::PROTOCOL;reply["protocolVersion"]=sws::VERSION;reply["status"]="ok";reply["payload"]["stopped"]=true;queueReply(reply);
+  }
   RxChunk chunk;unsigned processed=0;
   while(rxQueue&&processed++<8&&xQueueReceive(rxQueue,&chunk,0)==pdTRUE){
     if(chunk.epoch==lastEpoch&&linked.load())receiver.push(chunk.bytes,chunk.size,now);
   }
   receiver.tick(now);sendNext(now);drawDisplay(now);
+  boardRuntime.tick(now,linked.load(),tx.empty());
   if(rebootPending&&((tx.empty()&&uint32_t(now-rebootAt)>500)||uint32_t(now-rebootAt)>10000))ESP.restart();
   delay(2);
 }

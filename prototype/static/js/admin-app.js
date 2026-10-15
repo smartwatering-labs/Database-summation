@@ -10,14 +10,24 @@ function toast(message, error = false) {
   clearTimeout(toast.timer); toast.timer = setTimeout(() => { node.hidden = true; }, error ? 7000 : 3500);
 }
 
-function emptyPlant() { return { id:'', name:'', category:'', dailyMl:200, threshold:50, soilWeight:0.65, tempWeight:0.2, airWeight:0.15, tags:[] }; }
+function emptyPlant() { return { id:'', name:'', category:'', dailyMl:200, threshold:50, soilWeight:0.65, tempWeight:0.2, airWeight:0.15, tags:[],
+  evidence:{title:'',reference:'',referenceDate:'',conditions:'',cultivar:'',growthStage:'',medium:'',numericBasis:''},
+  review:{status:'engineering',reviewedAt:'',note:''},fieldValidation:{status:'untested',testedAt:'',conditions:'',summary:''},
+  suitability:{context:'outdoor',temperatureMinC:null,temperatureMaxC:null,humidityMinPct:null,humidityMaxPct:null} }; }
 
 function plantForm(plant = state.selected || emptyPlant()) {
-  const input = (name, label, value, extra = '') => `<label>${label}<input name="${name}" value="${e(value ?? '')}" ${extra} required></label>`;
+  const input = (name, label, value, extra = '', required = true) => `<label>${label}<input name="${name}" value="${e(value ?? '')}" ${extra} ${required?'required':''}></label>`;
+  const area = (name, label, value, max = 300) => `<label class="wide">${label}<textarea name="${name}" maxlength="${max}" rows="2">${e(value ?? '')}</textarea></label>`;
+  const choice = (name, label, value, options) => `<label>${label}<select name="${name}">${options.map(([key,text])=>`<option value="${key}" ${key===value?'selected':''}>${text}</option>`).join('')}</select></label>`;
+  const evidence=plant.evidence||emptyPlant().evidence, review=plant.review||emptyPlant().review, field=plant.fieldValidation||emptyPlant().fieldValidation, fit=plant.suitability||emptyPlant().suitability;
   return `<section class="content-section admin-library"><div class="section-heading"><div><span class="section-number">数据库唯一数据源</span><h2>植物配置</h2><p class="small muted">当前版本 ${e(state.data.plants.version)}；保存会创建数据库新版本</p></div><button class="button outline" data-action="new-plant">新增植物</button></div>
-    <div class="admin-library-layout"><div class="plant-list">${state.data.plants.items.map(item => `<button class="plant-row ${plant.id===item.id?'selected':''}" data-action="select-plant" data-plant-id="${e(item.id)}"><strong>${e(item.name)}</strong><span>${e(item.category)} · ${e(item.id)}</span></button>`).join('')}</div>
-    <form id="plant-form" class="plant-form">${input('id','标识 ID',plant.id,'pattern="[a-z0-9][a-z0-9-]{0,47}"')}${input('name','名称',plant.name)}${input('category','类别',plant.category)}${input('dailyMl','初始日需水量 mL',plant.dailyMl,'type="number" min="1" max="20000" step="1"')}${input('threshold','触发阈值',plant.threshold,'type="number" min="20" max="90" step="0.1"')}${input('soilWeight','土壤权重',plant.soilWeight,'type="number" min="0" max="1" step="0.01"')}${input('tempWeight','温度权重',plant.tempWeight,'type="number" min="0" max="1" step="0.01"')}${input('airWeight','空气权重',plant.airWeight,'type="number" min="0" max="1" step="0.01"')}${input('tags','标签，用逗号分隔',(plant.tags||[]).join(','))}
-      <label>来源说明<input name="source" value="管理员维护" maxlength="100" required></label><p class="form-error" role="alert">${e(state.error || '')}</p><button class="button primary" type="submit">保存植物配置</button></form></div></section>`;
+    <div class="admin-library-layout"><div class="plant-list">${state.data.plants.items.map(item => `<button class="plant-row ${plant.id===item.id?'selected':''}" data-action="select-plant" data-plant-id="${e(item.id)}"><strong>${e(item.name)}</strong><span>${e(item.category)} · ${e(item.id)} · ${e(({engineering:'工程建议',reviewed:'资料已核对',uncertain:'资料存疑',retired:'停用'})[item.review?.status]||'工程建议')}</span></button>`).join('')}</div>
+    <form id="plant-form" class="plant-form">${input('id','标识 ID',plant.id,'pattern="[a-z0-9][a-z0-9-]{0,47}"')}${input('name','名称',plant.name)}${input('category','类别',plant.category)}${input('dailyMl','初始日需水量 mL',plant.dailyMl,'type="number" min="1" max="20000" step="1"')}${input('threshold','触发阈值',plant.threshold,'type="number" min="20" max="90" step="0.1"')}${input('soilWeight','土壤权重',plant.soilWeight,'type="number" min="0" max="1" step="0.01"')}${input('tempWeight','温度权重',plant.tempWeight,'type="number" min="0" max="1" step="0.01"')}${input('airWeight','空气权重',plant.airWeight,'type="number" min="0" max="1" step="0.01"')}${input('tags','标签，用逗号分隔',(plant.tags||[]).join(','),'',false)}
+      <h3>资料来源与适用条件</h3>${input('evidenceTitle','来源标题',evidence.title,'maxlength="160"',false)}${input('evidenceReference','可定位引用或链接',evidence.reference,'maxlength="300"',false)}${input('evidenceReferenceDate','资料日期',evidence.referenceDate,'type="date"',false)}${input('evidenceCultivar','适用品种',evidence.cultivar,'maxlength="100"',false)}${input('evidenceGrowthStage','生长阶段',evidence.growthStage,'maxlength="100"',false)}${input('evidenceMedium','种植介质',evidence.medium,'maxlength="100"',false)}${area('evidenceConditions','资料使用条件',evidence.conditions)}${area('evidenceNumericBasis','数值依据',evidence.numericBasis,500)}
+      <h3>资料审核</h3>${choice('reviewStatus','资料状态',review.status,[['engineering','工程建议，待核对'],['reviewed','资料已核对'],['uncertain','资料存疑'],['retired','停用']])}${input('reviewReviewedAt','核对日期',review.reviewedAt,'type="date"',false)}${area('reviewNote','审核说明',review.note)}
+      <h3>已审核参考范围</h3><p class="wide small muted">可留空。填写上下限前先完成资料核对；网页仅以室外城市天气提供区域参考。</p>${choice('suitabilityContext','适用位置',fit.context,[['outdoor','室外'],['indoor','室内'],['greenhouse','温室']])}${input('temperatureMinC','温度下限 °C',fit.temperatureMinC,'type="number" min="-40" max="70" step="0.1"',false)}${input('temperatureMaxC','温度上限 °C',fit.temperatureMaxC,'type="number" min="-40" max="70" step="0.1"',false)}${input('humidityMinPct','空气湿度下限 %',fit.humidityMinPct,'type="number" min="0" max="100" step="0.1"',false)}${input('humidityMaxPct','空气湿度上限 %',fit.humidityMaxPct,'type="number" min="0" max="100" step="0.1"',false)}
+      <h3>实物验证</h3>${choice('fieldStatus','验证状态',field.status,[['untested','尚未实测'],['calibrated','已校准'],['trial','已完成栽培试验']])}${input('fieldTestedAt','实测日期',field.testedAt,'type="date"',false)}${area('fieldConditions','实测条件',field.conditions)}${area('fieldSummary','结果摘要',field.summary,500)}
+      ${input('source','本次修改说明','管理员维护','maxlength="100"')}<p class="form-error" role="alert">${e(state.error || '')}</p><button class="button primary" type="submit">保存植物配置</button></form></div></section>`;
 }
 
 function gitSection(git) {
@@ -59,9 +69,17 @@ root.addEventListener('submit', async event => {
   event.preventDefault();
   if (event.target.id === 'login-form') { state.token = new FormData(event.target).get('token'); await load(); return; }
   try {
-    if (event.target.id === 'plant-form') {
+    if (event.target.matches('#plant-form')) {
       const data = Object.fromEntries(new FormData(event.target));
-      const plant = { ...data, dailyMl:Number(data.dailyMl), threshold:Number(data.threshold), soilWeight:Number(data.soilWeight), tempWeight:Number(data.tempWeight), airWeight:Number(data.airWeight), tags:data.tags.split(',').map(tag=>tag.trim()).filter(Boolean) };
+      const plant = { id:data.id,name:data.name,category:data.category,dailyMl:Number(data.dailyMl),threshold:Number(data.threshold),
+        soilWeight:Number(data.soilWeight),tempWeight:Number(data.tempWeight),airWeight:Number(data.airWeight),tags:data.tags.split(',').map(tag=>tag.trim()).filter(Boolean),
+        evidence:{title:data.evidenceTitle,reference:data.evidenceReference,referenceDate:data.evidenceReferenceDate,conditions:data.evidenceConditions,
+          cultivar:data.evidenceCultivar,growthStage:data.evidenceGrowthStage,medium:data.evidenceMedium,numericBasis:data.evidenceNumericBasis},
+        review:{status:data.reviewStatus,reviewedAt:data.reviewReviewedAt,note:data.reviewNote},
+        fieldValidation:{status:data.fieldStatus,testedAt:data.fieldTestedAt,conditions:data.fieldConditions,summary:data.fieldSummary},
+        suitability:{context:data.suitabilityContext,temperatureMinC:data.temperatureMinC===''?null:Number(data.temperatureMinC),
+          temperatureMaxC:data.temperatureMaxC===''?null:Number(data.temperatureMaxC),humidityMinPct:data.humidityMinPct===''?null:Number(data.humidityMinPct),
+          humidityMaxPct:data.humidityMaxPct===''?null:Number(data.humidityMaxPct)} };
       const result = await api('/api/admin/libraries/plants',{method:'PUT',token:state.token,body:{plant,source:data.source,expectedRevision:state.data.plants.revision}});
       state.data.plants = result; state.selected = result.items.find(item=>item.id===plant.id) || plant; state.error=''; toast('植物配置已保存到数据库'); render();
     } else if (event.target.id === 'git-form') {

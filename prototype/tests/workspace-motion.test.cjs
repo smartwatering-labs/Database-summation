@@ -48,7 +48,12 @@ const out=path.resolve('test-results/workspace-motion');fs.mkdirSync(out,{recurs
   const scrollBefore=await page.locator('.panel-scroll').evaluate(n=>n.scrollTop);
   await page.getByRole('button',{name:'查看 3D 模型',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('#main').dataset.panelOpen==='0.0000'&&document.querySelector('#main').dataset.surfaceMoving==='false');
-  assert.ok(await panel.evaluate(n=>n.inert));assert.equal(await page.locator('#model-stage').evaluate(n=>getComputedStyle(n).filter),'blur(0px)');
+  assert.ok(await panel.evaluate(n=>n.inert));
+  const blur=await page.locator('#model-stage').evaluate(n=>{
+   const filter=getComputedStyle(n).filter;
+   return filter==='none'?0:parseFloat(filter.match(/blur\(([^p]+)/)?.[1]??'NaN');
+  });
+  assert.equal(blur,0,'preview has no background defocus');
   await page.screenshot({path:path.join(out,'configure-model.png')});
   await page.getByRole('button',{name:'返回配置面板',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#main').dataset.panelOpen==='1.0000'&&document.querySelector('#main').dataset.surfaceMoving==='false');
   assert.equal(await page.getByLabel('用户水泵流量',{exact:true}).inputValue(),'17');assert.equal(await page.locator('.panel-scroll').evaluate(n=>n.scrollTop),scrollBefore);

@@ -1,134 +1,520 @@
-// Document-positioned canvas: scrolling never interpolates its screen position.
-// Only model poses interpolate, using one interruptible scene for all routes.
-const stage=document.querySelector('#model-stage'), canvas=document.querySelector('#model-canvas');
-const reduced=matchMedia('(prefers-reduced-motion: reduce)');
-let route='home', config, THREE, renderer, scene, camera, rig, root, environment;
-let ready=false, disposed=false, lost=false, frame=0, open=0, scale=1;
-let x=0,y=0, width=0,height=0, parts=[],textures=[],targetQuaternion;
-let resolveSettled,settledPromise=Promise.resolve(),poseTween,interactive=false,drag,manualTarget,lastFrameTime=0;
-function targetFor(page){const pose=config.poses[page];return {x:pose.position?.[0]||0,y:pose.position?.[1]||0,scale:pose.scale};}
-function wake(){if(ready&&!disposed&&!lost&&!document.hidden&&!frame)frame=requestAnimationFrame(tick);}
-function settle(){stage.dataset.moving='false';resolveSettled?.();resolveSettled=null;}
-function beginPose(duration=440){
- manualTarget=null;
- resolveSettled?.();settledPromise=new Promise(resolve=>resolveSettled=resolve);
- if(!ready||lost||document.hidden){settle();return;}
- const pose=config.poses[route],target=targetFor(route);
- targetQuaternion.setFromEuler(new THREE.Euler(...pose.rotation));
- poseTween={start:performance.now(),duration,quaternion:rig.quaternion.clone(),target:targetQuaternion.clone(),open,scale,x,y,pose,targetPosition:target};
- stage.dataset.moving='true';wake();
+// One scene is shared by all routes. Frame the visible assembly, not removed shells.
+import { productStudio } from './product-studio.js';
+const stage = document.querySelector('#model-stage');
+const canvas = document.querySelector('#model-canvas');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+let route = 'home', config, THREE, renderer, scene, camera, rig, root, environment;
+let ready = false, disposed = false, lost = false, frame = 0, open = 0;
+let width = 0, height = 0, parts = [], textures = [], frames = {};
+let poseTween, manualTarget, drag, pinch, interactive = false, interactionRequested = false;
+let resolveSettled, settledPromise = Promise.resolve(), lastFrameTime = 0;
+let zoom = 1, targetZoom = 1, resetZoom = 1;
+let layoutDirty = true, layout, renderWidth = 0, renderHeight = 0;
+let floor, floorRig, baseShell, floorHeight;
+let groundOpacity = 0, groundTarget = 0, groundTween;
+const orbit = { yaw: 0, pitch: 0 };
+const pointers = new Map();
+const CAMERA_HEIGHT = 6;
+
+function wake() {
+  if (ready && !disposed && !lost && !document.hidden && !frame) frame = requestAnimationFrame(tick);
 }
-function setInteractive(enabled){
- interactive=enabled&&ready&&!lost;stage.dataset.interactive=String(interactive);stage.setAttribute('aria-hidden',String(!interactive));canvas.tabIndex=interactive?0:-1;
- if(drag){if(canvas.hasPointerCapture(drag.id))canvas.releasePointerCapture(drag.id);drag=null;}
- if(!enabled&&ready)beginPose();
+function settle() {
+  stage.dataset.moving = 'false';
+  resolveSettled?.(); resolveSettled = null;
 }
-function tick(time){
- frame=0;if(!ready||disposed||lost||document.hidden)return;
- const dt=Math.min(50,Math.max(0,time-lastFrameTime));lastFrameTime=time;
- if(manualTarget){
-  rig.quaternion.slerp(manualTarget,reduced.matches?1:1-Math.exp(-dt/28));
-  if(rig.quaternion.angleTo(manualTarget)<.0001){rig.quaternion.copy(manualTarget);manualTarget=null;}
- }
- if(poseTween){
-  const a=poseTween,t=reduced.matches?1:Math.min(1,Math.max(0,(time-a.start)/a.duration)),p=1-Math.pow(1-t,3);
-  rig.quaternion.slerpQuaternions(a.quaternion,a.target,p);
-  open=THREE.MathUtils.lerp(a.open,a.pose.open,p);scale=THREE.MathUtils.lerp(a.scale,a.targetPosition.scale,p);x=THREE.MathUtils.lerp(a.x,a.targetPosition.x,p);y=THREE.MathUtils.lerp(a.y,a.targetPosition.y,p);
-  if(t===1)poseTween=null;
- }
- for(const part of parts)part.node.position.copy(part.closed).lerp(part.open,open);
- const panel=document.querySelector('.panel-scroll');
- const range=panel?Math.max(1,panel.scrollHeight-panel.clientHeight):Math.max(1,document.documentElement.scrollHeight-innerHeight);
- const progress=reduced.matches||interactive?0:Math.min(1,Math.max(0,(panel?panel.scrollTop:scrollY)/range));
- rig.scale.setScalar(scale*(1-progress*.06));rig.position.set(innerWidth<768?x*.25:x,y,0);
- const q=rig.quaternion.clone();rig.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(progress*.045,progress*.09,0)));
- const w=Math.max(1,Math.round(stage.clientWidth)),h=Math.max(1,Math.round(stage.clientHeight));
- if(width!==w||height!==h){width=w;height=h;renderer.setSize(w,h,false);}
- const aspect=w/h,halfHeight=innerWidth<768?Math.max(2.4,2.8/aspect):Math.max(2.4+open*.4,3.45/aspect);
- camera.left=-halfHeight*aspect;camera.right=halfHeight*aspect;camera.top=halfHeight;camera.bottom=-halfHeight;camera.updateProjectionMatrix();
- renderer.render(scene,camera);rig.quaternion.copy(q);
- stage.dataset.route=route;stage.dataset.open=open.toFixed(4);
- stage.dataset.orientation=rig.quaternion.toArray().join(',');
- if(poseTween||manualTarget)wake();else settle();
+function partState(part, page) {
+  const state = part.config.states?.[page] || {};
+  return { position: part.base.clone().add(new THREE.Vector3(...(state.offset || [0, 0, 0]))), opacity: state.opacity ?? 1 };
 }
-function planarUV(geometry){
- const p=geometry.attributes.position,n=geometry.attributes.normal,uv=new Float32Array(p.count*2);
- for(let i=0;i<p.count;i++){const ax=Math.abs(n.getX(i)),ay=Math.abs(n.getY(i)),az=Math.abs(n.getZ(i));const u=ax>ay&&ax>az?p.getY(i):p.getX(i),v=az>=ax&&az>=ay?p.getY(i):p.getZ(i);uv[i*2]=u/6;uv[i*2+1]=v/6;}
- geometry.setAttribute('uv',new THREE.BufferAttribute(uv,2));
+function applyPartOpacity(part, opacity) {
+  part.node.visible = opacity > .001;
+  if (part.opacity === opacity) return;
+  part.opacity = opacity;
+  for (const mesh of part.meshes) {
+    mesh.castShadow = opacity > .995;
+    for (const material of (Array.isArray(mesh.material) ? mesh.material : [mesh.material])) {
+      // Keep shell shaders transparent-capable; fading must not recompile them mid-transition.
+      material.opacity = opacity;
+      // Keep occlusion stable throughout the fade; changing this near opacity=1
+      // suddenly removes the overlapping back faces and makes the shell pop.
+      material.depthWrite = true;
+    }
+  }
 }
-async function initialize(){
- try{
-  const response=await fetch('/static/assets/models/model.json');if(!response.ok)throw Error('模型配置读取失败');config=await response.json();
-  THREE=await import('../vendor/three/build/three.module.js');if(disposed)return;
-  renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:true,powerPreference:'high-performance'});
-  renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setClearColor(0xffffff,0);renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
-  scene=new THREE.Scene();camera=new THREE.OrthographicCamera(-4,4,2.4,-2.4,.1,100);camera.position.set(0,0,15);
-  const {RoomEnvironment}=await import('../vendor/three/addons/environments/RoomEnvironment.js');const room=new RoomEnvironment(),pmrem=new THREE.PMREMGenerator(renderer);
-  environment=pmrem.fromScene(room,.035);scene.environment=environment.texture;room.dispose();pmrem.dispose();
-  scene.add(new THREE.HemisphereLight(0xffffff,0x8090a8,1));const light=new THREE.DirectionalLight(0xffffff,2.8);light.position.set(-4,7,6);scene.add(light);
-  if(config.format==='obj'){
-   const [{OBJLoader},{MTLLoader}]=await Promise.all([import('../vendor/three/addons/loaders/OBJLoader.js'),import('../vendor/three/addons/loaders/MTLLoader.js')]);
-   const materials=await new MTLLoader().loadAsync(config.materials);root=await new OBJLoader().setMaterials(materials).loadAsync(config.url);
-  }else{const {GLTFLoader}=await import('../vendor/three/addons/loaders/GLTFLoader.js');root=(await new GLTFLoader().loadAsync(config.url)).scene;}
-  const loader=new THREE.TextureLoader(),base='/static/assets/materials/metal012/Metal012_1K-JPG_';
-  textures=await Promise.all(['Color','Roughness','NormalGL','Metalness'].map(name=>loader.loadAsync(base+name+'.jpg')));
-  textures.forEach(t=>{t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(6,18);t.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());});textures[0].colorSpace=THREE.SRGBColorSpace;
-  if(disposed){release();return;}
-  root.traverse(node=>{
-   if(!node.isMesh)return;planarUV(node.geometry);const old=Array.isArray(node.material)?node.material:[node.material];
-   const replacement=old.map(m=>{const dark=m.color.getHex()<0x444444;return new THREE.MeshPhysicalMaterial({color:dark?0x202b3d:0xe2e9f3,map:dark?null:textures[0],roughnessMap:textures[1],normalMap:textures[2],normalScale:new THREE.Vector2(.045,.045),metalnessMap:textures[3],metalness:dark?.55:.94,roughness:dark?.66:.42,anisotropy:.4,envMapIntensity:1.5,clearcoat:.16,clearcoatRoughness:.32,side:THREE.DoubleSide});});
-   node.material=Array.isArray(node.material)?replacement:replacement[0];old.forEach(m=>m.dispose());
+function visibleBounds() {
+  scene.updateMatrixWorld(true);
+  const result = new THREE.Box3();
+  root.traverseVisible(node => {
+    if (!node.isMesh) return;
+    if (!node.geometry.boundingBox) node.geometry.computeBoundingBox();
+    result.union(node.geometry.boundingBox.clone().applyMatrix4(node.matrixWorld));
   });
-  parts=(config.parts||[]).map(p=>{const node=root.getObjectByName(p.name);if(!node)throw Error('缺少模型部件：'+p.name);const closed=new THREE.Vector3(...p.closed);node.position.copy(closed);return {node,closed,open:new THREE.Vector3(...p.open)};});
-  if(config.upAxis==='z')root.rotation.x=-Math.PI/2;
-  const bounds=new THREE.Box3().setFromObject(root),size=bounds.getSize(new THREE.Vector3());root.position.sub(bounds.getCenter(new THREE.Vector3()));
-  const normalized=new THREE.Group();normalized.add(root);normalized.scale.setScalar(4.2/Math.max(size.x,size.y,size.z));
-  rig=new THREE.Group();rig.add(normalized);scene.add(rig);targetQuaternion=new THREE.Quaternion();rig.quaternion.setFromEuler(new THREE.Euler(...config.poses[route].rotation));
-  const target=targetFor(route);open=config.poses[route].open;scale=target.scale;x=target.x;y=target.y;
-  ready=true;stage.dataset.ready='true';document.body.classList.add('model-ready');wake();
- }catch(error){stage.dataset.error=error.message;stage.classList.add('model-failed');document.body.classList.remove('model-ready');console.warn('3D 展示暂不可用，全部业务操作仍可使用',error);ready=false;settle();release();}
+  return result;
 }
-function release(){cancelAnimationFrame(frame);frame=0;root?.traverse(n=>{n.geometry?.dispose();(Array.isArray(n.material)?n.material:[n.material]).forEach(m=>m?.dispose());});textures.forEach(t=>t.dispose());environment?.dispose();renderer?.dispose();}
-canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();lost=true;cancelAnimationFrame(frame);frame=0;document.body.classList.remove('model-ready');settle();});
-canvas.addEventListener('webglcontextrestored',()=>{lost=false;document.body.classList.add('model-ready');wake();});
-canvas.setAttribute('role','img');canvas.setAttribute('aria-label','三维模型，拖动或使用方向键旋转，Home 键归位');
-canvas.addEventListener('pointerdown',e=>{
- if(!interactive||!e.isPrimary||(e.pointerType==='mouse'&&e.button!==0))return;
- poseTween=null;manualTarget=null;settle();
- const rect=canvas.getBoundingClientRect();
- drag={id:e.pointerId,x:e.clientX,y:e.clientY,base:rig.quaternion.clone(),axis:null,sensitivity:Math.PI/Math.max(600,Math.min(rect.width,rect.height))};
- canvas.setPointerCapture(e.pointerId);canvas.focus({preventScroll:true});
-});
-function rotate(dx,dy,base=manualTarget||rig.quaternion){
- if(poseTween){poseTween=null;settle();}
- const angle=Math.hypot(dx,dy);
- const axis=new THREE.Vector3(dy,dx,0).applyQuaternion(camera.quaternion).normalize();
- manualTarget=new THREE.Quaternion().setFromAxisAngle(axis,angle).multiply(base).normalize();
- stage.dataset.moving='true';wake();
+function prepareFrames(unit) {
+  for (const [page, pose] of Object.entries(config.poses)) {
+    for (const part of parts) {
+      const state = partState(part, page);
+      part.node.position.copy(state.position); applyPartOpacity(part, state.opacity);
+    }
+    rig.quaternion.identity(); root.position.set(0, 0, 0);
+    // Each route has its own pivot, regardless of which URL was opened first.
+    const focus = visibleBounds().getCenter(new THREE.Vector3()).multiplyScalar(-1 / unit);
+    root.position.copy(focus);
+    const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(...pose.rotation, pose.rotationOrder || 'YXZ'));
+    rig.quaternion.copy(quaternion);
+    const bounds = visibleBounds();
+    frames[page] = { focus, quaternion, size: bounds.getSize(new THREE.Vector3()), center: bounds.getCenter(new THREE.Vector3()) };
+  }
 }
-canvas.addEventListener('pointermove',e=>{
- if(!interactive||!drag||drag.id!==e.pointerId)return;
- let dx=e.clientX-drag.x,dy=e.clientY-drag.y;
- if(!drag.axis){
-  if(Math.hypot(dx,dy)<5)return;
-  // Infer intent once per gesture, so a slightly uneven horizontal drag cannot tilt upward.
-  drag.axis=Math.abs(dx)>Math.abs(dy)*1.6?'horizontal':Math.abs(dy)>Math.abs(dx)*1.6?'vertical':'free';
- }
- // Small cross-axis motion is hand jitter; deliberate bends still rotate freely.
- if(drag.axis==='horizontal')dy=Math.sign(dy)*Math.max(0,Math.abs(dy)-24);
- if(drag.axis==='vertical')dx=Math.sign(dx)*Math.max(0,Math.abs(dx)-24);
- // Start-relative screen axes avoid accumulating event noise or diagonal Euler roll.
- rotate(dx*drag.sensitivity,dy*drag.sensitivity,drag.base);
+function createGround(normalized) {
+  baseShell = parts.find(p => p.config.kind === 'shell' && p.config.name !== '外壳-顶盖');
+  if (!baseShell) return;
+  const saved = baseShell.node.position.clone(); baseShell.node.position.copy(baseShell.base);
+  scene.updateMatrixWorld(true);
+  const inverse = root.matrixWorld.clone().invert(), bounds = new THREE.Box3();
+  for (const mesh of baseShell.meshes) {
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    bounds.union(mesh.geometry.boundingBox.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse, mesh.matrixWorld)));
+  }
+  baseShell.node.position.copy(saved);
+  const settings = productStudio.ground, size = bounds.getSize(new THREE.Vector3()), center = bounds.getCenter(new THREE.Vector3());
+  const zUp = config.upAxis === 'z';
+  floorHeight = (zUp ? bounds.min.z : bounds.min.y) - settings.gap;
+  floor = new THREE.Mesh(new THREE.PlaneGeometry(size.x * settings.sizeRatio, (zUp ? size.y : size.z) * settings.sizeRatio),
+    new THREE.ShadowMaterial({ opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+  floor.name = 'studio-shadow-receiver'; floor.receiveShadow = true; floor.renderOrder = -1;
+  floor.position.set(center.x, zUp ? center.y : floorHeight, zUp ? floorHeight : center.z);
+  if (!zUp) floor.rotation.x = -Math.PI / 2;
+  floorRig = new THREE.Group(); floorRig.rotation.copy(root.rotation); floorRig.add(floor); normalized.add(floorRig);
+  stage.dataset.ground = 'geometry-shadow';
+}
+function layoutFor(page) {
+  const pose = config.poses[page], reference = frames[page];
+  const frameConfig = innerWidth < 768 || (page === 'product' && innerWidth < 1200) ? pose.frame.mobile : pose.frame.desktop;
+  const cameraWidth = CAMERA_HEIGHT * width / height;
+  let centerY = frameConfig.center[1] * height, availableHeight = height * frameConfig.fill[1];
+  const main = document.querySelector('#main');
+  // The product occupies an explicit column/row in the page grid. Measure that
+  // region so model framing and copy share one layout, including sidebar resize.
+  const region = main?.dataset.route === page ? main.querySelector('.hero-visual-region') : null;
+  if (region) {
+    const box = region.getBoundingClientRect(), stageBox = stage.getBoundingClientRect();
+    const inset = innerWidth < 768 ? 4 : 16;
+    const captionHeight = 56;
+    const usableWidth = Math.max(80, box.width - inset * 2);
+    const usableHeight = Math.max(80, box.height - inset * 2 - captionHeight);
+    const scale = Math.min(CAMERA_HEIGHT * usableWidth / height / reference.size.x,
+      CAMERA_HEIGHT * usableHeight / height / reference.size.y);
+    const x = box.left - stageBox.left + box.width / 2;
+    const y = box.top - stageBox.top + inset + usableHeight / 2;
+    return { scale, x: (x / width - .5) * cameraWidth - reference.center.x * scale,
+      y: (.5 - y / height) * CAMERA_HEIGHT - reference.center.y * scale };
+  }
+  const copy = main?.dataset.route === page ? main.querySelector('.hero-copy') : null;
+  let top = 16, bottom = height;
+  const besideCopy = page === 'product' && innerWidth >= 1200;
+  if (copy && !besideCopy) {
+    const stageTop = stage.getBoundingClientRect().top;
+    const clearance = page === 'home' ? 20 : 28;
+    bottom = Math.min(height, copy.getBoundingClientRect().top - stageTop - clearance);
+    // The headline bounds the home model vertically. The auxiliary controls
+    // sit to its right; reserving their whole row pushes the product upward.
+    const heading = main.querySelector('.hero-product-heading');
+    if (heading) top = Math.max(top, heading.getBoundingClientRect().bottom - stageTop + 12);
+    availableHeight = Math.min(availableHeight, Math.max(80, bottom - top));
+  }
+  let scale = Math.min(cameraWidth * frameConfig.fill[0] / reference.size.x, CAMERA_HEIGHT * availableHeight / height / reference.size.y);
+  let centerX = page === 'product' && !besideCopy ? .5 : frameConfig.center[0];
+  if (copy && besideCopy) {
+    const stageLeft = stage.getBoundingClientRect().left;
+    const textRight = copy.getBoundingClientRect().right - stageLeft + 20;
+    const rightEdge = width - 16;
+    const usableWidth = Math.max(80, rightEdge - textRight);
+    scale = Math.min(scale, CAMERA_HEIGHT * usableWidth / height / reference.size.x);
+    const halfWidth = reference.size.x * scale * height / CAMERA_HEIGHT / 2;
+    centerX = THREE.MathUtils.clamp(centerX * width, textRight + halfWidth, rightEdge - halfWidth) / width;
+  }
+  if (copy && !besideCopy) {
+    const halfModel = reference.size.y * scale * height / CAMERA_HEIGHT / 2;
+    centerY = THREE.MathUtils.clamp(centerY, top + halfModel, Math.max(top + halfModel, bottom - halfModel));
+  }
+  return {
+    scale,
+    x: (centerX - .5) * cameraWidth - reference.center.x * scale,
+    y: (.5 - centerY / height) * CAMERA_HEIGHT - reference.center.y * scale,
+  };
+}
+function cancelPointers() {
+  const ids = [...pointers.keys()];
+  pointers.clear(); drag = null; pinch = null;
+  for (const id of ids) if (canvas.hasPointerCapture(id)) canvas.releasePointerCapture(id);
+}
+function beginPose(duration = 420) {
+  layoutDirty = true;
+  cancelPointers(); manualTarget = null;
+  resolveSettled?.(); settledPromise = new Promise(resolve => resolveSettled = resolve);
+  if (!ready || lost) { settle(); return; }
+  const partStates = parts.map(part => {
+    const target = partState(part, route);
+    return { part, startPosition: part.node.position.clone(), targetPosition: target.position, startOpacity: part.opacity, targetOpacity: target.opacity };
+  });
+  poseTween = {
+    start: performance.now(), duration, quaternion: rig.quaternion.clone(), focus: root.position.clone(),
+    position: rig.position.clone(), scale: rig.scale.x, viewport: { width, height }, open, partStates,
+  };
+  resetZoom = zoom; targetZoom = 1;
+  stage.dataset.moving = 'true'; wake();
+}
+function setInteractive(enabled) {
+  interactionRequested = enabled;
+  interactive = enabled && ready && !lost;
+  stage.dataset.interactive = String(interactive); stage.setAttribute('aria-hidden', String(!interactive));
+  canvas.tabIndex = interactive ? 0 : -1; cancelPointers();
+  if (!enabled && ready) beginPose();
+}
+function updateGround(time) {
+  if (!floorRig) return;
+  floorRig.position.copy(root.position);
+  const axis = config.upAxis === 'z' ? 'z' : 'y';
+  floor.position[axis] = floorHeight + baseShell.node.position[axis] - baseShell.base[axis];
+  const settings = productStudio.ground;
+  const target = poseTween ? 0 : route === 'home' ? settings.homeOpacity : route === 'product' ? settings.productOpacity : 0;
+  if (target !== groundTarget) {
+    groundTarget = target;
+    groundTween = { start: time, from: groundOpacity, to: target, duration: target > groundOpacity ? settings.fadeInMs : settings.fadeOutMs };
+  }
+  if (groundTween) {
+    const t = reduced.matches || groundTween.duration <= 0 ? 1 : Math.min(1, Math.max(0, (time - groundTween.start) / groundTween.duration));
+    groundOpacity = THREE.MathUtils.lerp(groundTween.from, groundTween.to, t * t * (3 - 2 * t));
+    if (t === 1) groundTween = null;
+  }
+  // Keep the receiver while it fades; toggling it off first would still flash.
+  floorRig.visible = groundOpacity > 0 || !!groundTween?.to;
+  floor.material.opacity = groundOpacity;
+  stage.dataset.shadowMoving = String(!!groundTween);
+  stage.dataset.shadowOpacity = groundOpacity.toFixed(4);
+}
+function tick(time) {
+  frame = 0;
+  if (!ready || disposed || lost || document.hidden) return;
+  const dt = Math.min(50, Math.max(1, time - lastFrameTime)); lastFrameTime = time;
+  const w = Math.max(1, Math.round(stage.clientWidth)), h = Math.max(1, Math.round(stage.clientHeight));
+  if (width !== w || height !== h) {
+    if (poseTween && poseTween.viewport.height) {
+      // Route-specific stage heights change instantly. Keep the model's old
+      // screen position and pixel size as the animation's starting point.
+      const previous = poseTween.viewport, ratio = previous.height / h;
+      poseTween.position.x = poseTween.position.x * ratio + 3 * (previous.width - w) / h;
+      poseTween.position.y = poseTween.position.y * ratio + 3 * (h - previous.height) / h;
+      poseTween.scale *= ratio;
+      poseTween.viewport = { width: w, height: h };
+    }
+    width = w; height = h; layoutDirty = true;
+    camera.left = -CAMERA_HEIGHT * w / h / 2; camera.right = -camera.left;
+    camera.top = CAMERA_HEIGHT / 2; camera.bottom = -camera.top; camera.updateProjectionMatrix();
+  }
+  // A route's taller document canvas must not reallocate GPU buffers mid-motion.
+  const bufferHeight = Math.max(innerWidth < 768 ? 680 : 620, innerHeight - (innerWidth < 768 ? 120 : 76));
+  if (renderWidth !== w || renderHeight !== bufferHeight) {
+    renderWidth = w; renderHeight = bufferHeight; renderer.setSize(w, bufferHeight, false);
+  }
+  if (layoutDirty) { layout = layoutFor(route); layoutDirty = false; }
+  const target = layout;
+  if (poseTween) {
+    const a = poseTween, t = reduced.matches ? 1 : Math.min(1, Math.max(0, (time - a.start) / a.duration));
+    const p = t * t * (3 - 2 * t), reference = frames[route];
+    rig.quaternion.slerpQuaternions(a.quaternion, reference.quaternion, p);
+    root.position.lerpVectors(a.focus, reference.focus, p);
+    rig.position.set(THREE.MathUtils.lerp(a.position.x, target.x, p), THREE.MathUtils.lerp(a.position.y, target.y, p), 0);
+    rig.scale.setScalar(THREE.MathUtils.lerp(a.scale, target.scale, p));
+    open = THREE.MathUtils.lerp(a.open, config.poses[route].open, p);
+    zoom = THREE.MathUtils.lerp(resetZoom, 1, p);
+    for (const state of a.partStates) {
+      state.part.node.position.lerpVectors(state.startPosition, state.targetPosition, p);
+      applyPartOpacity(state.part, THREE.MathUtils.lerp(state.startOpacity, state.targetOpacity, p));
+    }
+    if (t === 1) { poseTween = null; zoom = targetZoom = 1; syncOrbit(); }
+  } else {
+    if (manualTarget) {
+      // Pointer movement is already sampled by RAF. A second filter adds hand lag.
+      if (drag || reduced.matches) rig.quaternion.copy(manualTarget);
+      else rig.quaternion.slerp(manualTarget, 1 - Math.exp(-dt / 16));
+      if (rig.quaternion.angleTo(manualTarget) < .0001) { rig.quaternion.copy(manualTarget); manualTarget = null; }
+    }
+    zoom = pinch || reduced.matches ? targetZoom : THREE.MathUtils.lerp(zoom, targetZoom, 1 - Math.exp(-dt / 45));
+    if (Math.abs(zoom - targetZoom) < .0001) zoom = targetZoom;
+    rig.scale.setScalar(target.scale * zoom); rig.position.set(target.x, target.y, 0);
+  }
+  updateGround(time);
+  renderer.render(scene, camera);
+  stage.dataset.route = route; stage.dataset.open = open.toFixed(4);
+  stage.dataset.orientation = rig.quaternion.toArray().join(','); stage.dataset.zoom = zoom.toFixed(4);
+  if (poseTween || manualTarget || zoom !== targetZoom) wake(); else settle();
+  // Shadow-only frames continue after the pose settles, without delaying page
+  // reveal or locking navigation. Interruptions resume from the current alpha.
+  if (groundTween) wake();
+}
+function planarUV(geometry) {
+  const p = geometry.attributes.position, n = geometry.attributes.normal, uv = new Float32Array(p.count * 2);
+  for (let i = 0; i < p.count; i++) {
+    const ax = Math.abs(n.getX(i)), ay = Math.abs(n.getY(i)), az = Math.abs(n.getZ(i));
+    uv[i * 2] = (ax > ay && ax > az ? p.getY(i) : p.getX(i)) / 6;
+    uv[i * 2 + 1] = (az >= ax && az >= ay ? p.getY(i) : p.getZ(i)) / 6;
+  }
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+}
+function moldedGrain() {
+  const data = new Uint8Array(256 * 256 * 4); let seed = 9100;
+  for (let i = 0; i < data.length; i += 4) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const value = 220 + (seed >>> 28);
+    data[i] = data[i + 1] = data[i + 2] = value; data[i + 3] = 255;
+  }
+  const texture = new THREE.DataTexture(data, 256, 256);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(7, 7);
+  texture.magFilter = THREE.LinearFilter; texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true; texture.needsUpdate = true; textures.push(texture); return texture;
+}
+function studioEnvironment() {
+  const settings = productStudio.environment;
+  const studio = new THREE.Scene(); studio.background = new THREE.Color(settings.background);
+  const geometry = new THREE.PlaneGeometry(1, 1), materials = [];
+  // Feathered softbox luminance gives continuous reflections on the CAD fillets
+  // rather than uniformly white panels or hard rectangular highlights.
+  const pixels = new Uint8Array(64 * 64 * 4);
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+    const edge = Math.min(x, y, 63 - x, 63 - y) / 12;
+    const t = Math.min(1, edge), value = Math.round(255 * (.3 + .7 * t * t * (3 - 2 * t)));
+    const i = (y * 64 + x) * 4; pixels[i] = pixels[i + 1] = pixels[i + 2] = value; pixels[i + 3] = 255;
+  }
+  const softbox = new THREE.DataTexture(pixels, 64, 64); softbox.magFilter = softbox.minFilter = THREE.LinearFilter; softbox.needsUpdate = true;
+  for (const { position, size, power } of settings.cards) {
+    const material = new THREE.MeshBasicMaterial({ color: new THREE.Color().setRGB(power, power, power), map: softbox, side: THREE.DoubleSide });
+    const card = new THREE.Mesh(geometry, material);
+    card.position.set(...position); card.scale.set(...size, 1); card.lookAt(0, 0, 0);
+    studio.add(card); materials.push(material);
+  }
+  const pmrem = new THREE.PMREMGenerator(renderer); environment = pmrem.fromScene(studio, settings.blur);
+  scene.environment = environment.texture; pmrem.dispose(); geometry.dispose(); softbox.dispose(); materials.forEach(m => m.dispose());
+}
+function modelMaterial(source, shell, grain) {
+  if (shell && source.name === 'shell-silkscreen') return new THREE.MeshStandardMaterial({
+    name: source.name, color: 0x161718, metalness: 0, roughness: .82,
+    envMapIntensity: .15, side: THREE.DoubleSide, transparent: true, forceSinglePass: true,
+  });
+  if (shell) return new THREE.MeshPhysicalMaterial({
+    name: 'abs-plastic', ...productStudio.shell, roughnessMap: grain,
+    // Keep the original CAD normals clean. Micro variation affects roughness
+    // only: ABS must read as a moulded satin surface, never as textured chalk.
+    side: THREE.DoubleSide, shadowSide: THREE.FrontSide, transparent: true, forceSinglePass: true,
+  });
+  // Roles come from complete CAD solids, separating white silkscreen from metal.
+  const finishes = productStudio.finishes;
+  const name = source.name, [color, metalness, roughness] = finishes[name] || [0x34393d, 0, .7];
+  if (name === 'solder-mask') return new THREE.MeshPhysicalMaterial({
+    name, color, metalness: 0, roughness, specularIntensity: .45,
+    ior: 1.5, clearcoat: .04, clearcoatRoughness: .48, envMapIntensity: .4, side: THREE.DoubleSide,
+  });
+  if (name === 'ic-epoxy' || name === 'connector-polymer') return new THREE.MeshPhysicalMaterial({
+    name, color, metalness: 0, roughness, roughnessMap: grain, bumpMap: grain,
+    bumpScale: name === 'ic-epoxy' ? .0006 : .0003,
+    specularIntensity: name === 'ic-epoxy' ? .28 : .5,
+    envMapIntensity: .5, side: THREE.DoubleSide,
+  });
+  return new THREE.MeshStandardMaterial({ name, color, metalness, roughness, envMapIntensity: metalness > .5 ? 1.1 : .3, side: THREE.DoubleSide });
+}
+function stableAreaLightBasis(shader) {
+  // r180's LTC tangent normalizes V - N * dot(V, N). In an orthographic
+  // top view V and N are parallel, so that vector is zero and area lighting
+  // disappears until the model is rotated. Supply a perpendicular basis.
+  const chunk = THREE.ShaderChunk.lights_physical_pars_fragment.replace(
+    'T1 = normalize( V - N * dot( V, N ) );',
+    `vec3 tangent = V - N * dot( V, N );
+    if ( dot( tangent, tangent ) < 1e-6 ) {
+      vec3 axis = abs( N.z ) < 0.999 ? vec3( 0.0, 0.0, 1.0 ) : vec3( 0.0, 1.0, 0.0 );
+      tangent = cross( axis, N );
+    }
+    T1 = normalize( tangent );`);
+  shader.fragmentShader = shader.fragmentShader.replace('#include <lights_physical_pars_fragment>', chunk);
+}
+async function initialize() {
+  try {
+    const response = await fetch('/static/assets/models/model.json');
+    if (!response.ok) throw Error('模型配置读取失败'); config = await response.json();
+    THREE = await import('../vendor/three/build/three.module.js'); if (disposed) return;
+    renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, productStudio.renderer.maxPixelRatio)); renderer.setClearColor(0xffffff, 0);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = productStudio.renderer.exposure;
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.VSMShadowMap;
+    scene = new THREE.Scene(); camera = new THREE.OrthographicCamera(-4, 4, 3, -3, .1, 100); camera.position.set(0, 0, 15);
+    const lighting = productStudio.lights;
+    studioEnvironment(); scene.add(new THREE.HemisphereLight(lighting.hemisphere.sky, lighting.hemisphere.ground, lighting.hemisphere.intensity));
+    const { RectAreaLightUniformsLib } = await import('../vendor/three/addons/lights/RectAreaLightUniformsLib.js');
+    RectAreaLightUniformsLib.init();
+    textures.push(...['LTC_FLOAT_1', 'LTC_FLOAT_2', 'LTC_HALF_1', 'LTC_HALF_2'].map(name => THREE.UniformsLib[name]));
+    const shadow = lighting.shadow, extent = shadow.extent;
+    const key = new THREE.DirectionalLight(0xffffff, shadow.intensity); key.position.set(...shadow.position);
+    key.castShadow = true; key.shadow.mapSize.set(shadow.mapSize, shadow.mapSize);
+    Object.assign(key.shadow.camera, { left: -extent, right: extent, top: extent, bottom: -extent, near: .1, far: 35 });
+    key.shadow.normalBias = shadow.normalBias; key.shadow.bias = shadow.bias; key.shadow.radius = shadow.radius; key.shadow.blurSamples = shadow.blurSamples; scene.add(key);
+    for (const [name, spec] of Object.entries({ key: lighting.key, fill: lighting.fill, rim: lighting.rim })) {
+      const light = new THREE.RectAreaLight(spec.color, spec.intensity, ...spec.size); light.name = `studio-${name}`; light.position.set(...spec.position); light.lookAt(0, 0, 0); scene.add(light);
+    }
+    if (config.format === 'obj') {
+      const [{ OBJLoader }, { MTLLoader }] = await Promise.all([import('../vendor/three/addons/loaders/OBJLoader.js'), import('../vendor/three/addons/loaders/MTLLoader.js')]);
+      root = await new OBJLoader().setMaterials(await new MTLLoader().loadAsync(config.materials)).loadAsync(config.url);
+    } else {
+      const { GLTFLoader } = await import('../vendor/three/addons/loaders/GLTFLoader.js'); root = (await new GLTFLoader().loadAsync(config.url)).scene;
+    }
+    if (disposed) { release(); return; }
+    const grain = moldedGrain();
+    const shells = new Set((config.parts || []).filter(p => p.kind === 'shell').map(p => p.name));
+    root.traverse(node => {
+      if (!node.isMesh) return; let ancestor = node, shell;
+      while (ancestor && ancestor !== root) { if (shells.has(ancestor.name)) { shell = ancestor.name; break; } ancestor = ancestor.parent; }
+      if (shell || ['ic-epoxy', 'connector-polymer'].includes(node.material.name)) planarUV(node.geometry);
+      const old = Array.isArray(node.material) ? node.material : [node.material];
+      const replacements = old.map(m => modelMaterial(m, shell, grain));
+      node.material = Array.isArray(node.material) ? replacements : replacements[0];
+      node.castShadow = true; node.receiveShadow = true;
+      replacements.forEach(m => {
+        m.shadowSide = THREE.FrontSide;
+        if (m.isMeshStandardMaterial) {
+          m.onBeforeCompile = stableAreaLightBasis;
+          m.customProgramCacheKey = () => 'ltc-normal-incidence-v1';
+        }
+      }); old.forEach(m => m.dispose());
+    });
+    parts = (config.parts || []).map(p => {
+      const node = root.getObjectByName(p.name); if (!node) throw Error('缺少模型部件：' + p.name);
+      const meshes = []; node.traverse(child => { if (child.isMesh) meshes.push(child); });
+      return { node, config: p, base: node.position.clone(), opacity: undefined, meshes };
+    });
+    const sourceSize = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3());
+    const unit = 4.2 / Math.max(sourceSize.x, config.upAxis === 'z' ? sourceSize.y : sourceSize.z);
+    if (config.upAxis === 'z') root.rotation.x = -Math.PI / 2;
+    const normalized = new THREE.Group(); normalized.scale.setScalar(unit); normalized.add(root);
+    rig = new THREE.Group(); rig.add(normalized); scene.add(rig); prepareFrames(unit); createGround(normalized);
+    // Warm every material, including shells hidden by a directly opened hardware page.
+    for (const part of parts) applyPartOpacity(part, 1);
+    await renderer.compileAsync(scene, camera);
+    if (disposed) { release(); return; }
+    // Navigation and panel actions can happen while the GLB or shaders are loading.
+    for (const part of parts) { const state = partState(part, route); part.node.position.copy(state.position); applyPartOpacity(part, state.opacity); }
+    root.position.copy(frames[route].focus); rig.quaternion.copy(frames[route].quaternion); open = config.poses[route].open; syncOrbit();
+    ready = true; stage.dataset.ready = 'true'; document.body.classList.add('model-ready');
+    if (interactionRequested) setInteractive(true);
+    wake();
+  } catch (error) {
+    stage.dataset.error = error.message; stage.classList.add('model-failed'); document.body.classList.remove('model-ready');
+    console.warn('3D 展示暂不可用，全部业务操作仍可使用', error); ready = false; settle(); release();
+  }
+}
+function release() {
+  cancelAnimationFrame(frame); frame = 0;
+  root?.traverse(node => { node.geometry?.dispose(); (Array.isArray(node.material) ? node.material : [node.material]).forEach(m => m?.dispose()); });
+  scene?.traverse(node => node.shadow?.dispose());
+  textures.forEach(t => t.dispose()); environment?.dispose(); renderer?.dispose();
+  floor?.geometry.dispose(); floor?.material.dispose();
+}
+function syncOrbit() {
+  const euler = new THREE.Euler().setFromQuaternion(rig.quaternion, config.poses[route].rotationOrder || 'YXZ');
+  orbit.yaw = euler.y; orbit.pitch = euler.x;
+}
+function startDrag(pointer) {
+  const rect = canvas.getBoundingClientRect();
+  drag = { ...pointer, base: { ...orbit }, axis: null, sensitivity: Math.PI / Math.max(500, Math.min(rect.width, rect.height)) };
+}
+function stopPoseForInput() {
+  if (poseTween) {
+    poseTween = null; zoom = targetZoom = 1; root.position.copy(frames[route].focus);
+    for (const part of parts) { const state = partState(part, route); part.node.position.copy(state.position); applyPartOpacity(part, state.opacity); }
+  }
+}
+function rotate(dx, dy, base = orbit) {
+  // Turntable: one fixed model-up yaw axis and one fixed horizontal tilt axis.
+  // Rebuild from two scalar angles; never accumulate quaternion roll from drags.
+  orbit.yaw = base.yaw + dx;
+  orbit.pitch = THREE.MathUtils.clamp(base.pitch + dy, -Math.PI + .02, Math.PI - .02);
+  manualTarget = new THREE.Quaternion().setFromEuler(new THREE.Euler(orbit.pitch, orbit.yaw, 0, config.poses[route].rotationOrder || 'YXZ'));
+  rig.quaternion.copy(manualTarget);
+  stage.dataset.moving = 'true'; wake();
+}
+canvas.addEventListener('pointerdown', event => {
+  if (!interactive || (event.pointerType === 'mouse' && event.button !== 0)) return;
+  stopPoseForInput(); manualTarget = null;
+  const pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  pointers.set(pointer.id, pointer); canvas.setPointerCapture(pointer.id); canvas.focus({ preventScroll: true });
+  if (pointers.size === 1) startDrag(pointer);
+  else { const [a, b] = [...pointers.values()]; pinch = { distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), zoom }; drag = null; }
 });
-for(const type of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(type,e=>{if(drag?.id===e.pointerId)drag=null;});
-canvas.addEventListener('keydown',e=>{if(!interactive)return;const moves={ArrowLeft:[-.12,0],ArrowRight:[.12,0],ArrowUp:[0,-.12],ArrowDown:[0,.12]};if(moves[e.key]){e.preventDefault();rotate(...moves[e.key]);}else if(e.key==='Home'){e.preventDefault();beginPose();}});
-addEventListener('scroll',wake,{passive:true});document.addEventListener('scroll',e=>{if(e.target?.classList?.contains('panel-scroll'))wake();},{passive:true,capture:true});
-addEventListener('resize',wake);reduced.addEventListener('change',wake);document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelAnimationFrame(frame);frame=0;settle();}else wake();});
-const observer=new ResizeObserver(wake);observer.observe(stage);
-addEventListener('pagehide',()=>{disposed=true;ready=false;observer.disconnect();settle();release();},{once:true});
-export const modelStage={
- update(next,publish=true){if(publish)document.body.dataset.page=next;if(next!==route){interactive=false;stage.dataset.interactive='false';stage.setAttribute('aria-hidden','true');canvas.tabIndex=-1;if(drag&&canvas.hasPointerCapture(drag.id))canvas.releasePointerCapture(drag.id);drag=null;route=next;beginPose();}else if(ready)wake();return settledPromise;},
- setInteractive,
- whenSettled(){return settledPromise;}
+canvas.addEventListener('pointermove', event => {
+  if (!interactive || !pointers.has(event.pointerId)) return;
+  pointers.set(event.pointerId, { id: event.pointerId, x: event.clientX, y: event.clientY });
+  if (pinch && pointers.size > 1) {
+    const [a, b] = [...pointers.values()];
+    targetZoom = THREE.MathUtils.clamp(pinch.zoom * Math.hypot(a.x - b.x, a.y - b.y) / pinch.distance, .7, 1.75);
+    stage.dataset.moving = 'true'; wake(); return;
+  }
+  if (!drag || drag.id !== event.pointerId) return;
+  let dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+  if (!drag.axis && Math.hypot(dx, dy) > 2) drag.axis = Math.abs(dx) > Math.abs(dy) * 2.4 ? 'horizontal' : Math.abs(dy) > Math.abs(dx) * 2.4 ? 'vertical' : 'free';
+  // Reject tiny hand tremor; deliberate direction changes engage after eight pixels.
+  if (drag.axis === 'horizontal') dy = Math.sign(dy) * Math.max(0, Math.abs(dy) - 8);
+  if (drag.axis === 'vertical') dx = Math.sign(dx) * Math.max(0, Math.abs(dx) - 8);
+  rotate(dx * drag.sensitivity, dy * drag.sensitivity, drag.base);
+});
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(type, event => {
+  if (!pointers.has(event.pointerId)) return;
+  pointers.delete(event.pointerId); pinch = null;
+  if (manualTarget) { rig.quaternion.copy(manualTarget); manualTarget = null; }
+  drag = null; if (pointers.size === 1) startDrag([...pointers.values()][0]); wake();
+});
+canvas.addEventListener('wheel', event => {
+  if (!interactive) return; event.preventDefault(); stopPoseForInput();
+  const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? height : 1);
+  targetZoom = THREE.MathUtils.clamp(targetZoom * Math.exp(-pixels * .0012), .7, 1.75);
+  stage.dataset.moving = 'true'; wake();
+}, { passive: false });
+canvas.addEventListener('dblclick', () => { if (interactive) beginPose(360); });
+canvas.addEventListener('keydown', event => {
+  if (!interactive) return;
+  const moves = { ArrowLeft: [-.12, 0], ArrowRight: [.12, 0], ArrowUp: [0, -.12], ArrowDown: [0, .12] };
+  if (moves[event.key]) { event.preventDefault(); stopPoseForInput(); rotate(...moves[event.key]); }
+  else if (event.key === 'Home') { event.preventDefault(); beginPose(360); }
+  else if (['+', '=', '-'].includes(event.key)) { event.preventDefault(); targetZoom = THREE.MathUtils.clamp(targetZoom * (event.key === '-' ? .9 : 1.1), .7, 1.75); wake(); }
+});
+canvas.setAttribute('role', 'img');
+canvas.setAttribute('aria-label', '三维模型，拖动或方向键旋转，滚轮或双指缩放，双击或 Home 键归位');
+canvas.addEventListener('webglcontextlost', event => { event.preventDefault(); lost = true; cancelPointers(); cancelAnimationFrame(frame); frame = 0; document.body.classList.remove('model-ready'); settle(); });
+canvas.addEventListener('webglcontextrestored', () => { lost = false; document.body.classList.add('model-ready'); beginPose(0); });
+addEventListener('resize', () => { layoutDirty = true; wake(); }); reduced.addEventListener('change', wake);
+document.addEventListener('visibilitychange', () => { if (document.hidden) { cancelPointers(); cancelAnimationFrame(frame); frame = 0; settle(); } else wake(); });
+const observer = new ResizeObserver(() => { layoutDirty = true; wake(); }); observer.observe(stage);
+observer.observe(document.querySelector('#main'));
+addEventListener('pagehide', () => { disposed = true; ready = false; observer.disconnect(); settle(); release(); }, { once: true });
+export const modelStage = {
+  update(next, publish = true) {
+    layoutDirty = true;
+    if (publish) document.body.dataset.page = next;
+    if (next !== route) {
+      interactive = interactionRequested = false; stage.dataset.interactive = 'false'; stage.setAttribute('aria-hidden', 'true'); canvas.tabIndex = -1;
+      route = next; beginPose();
+    } else if (ready) wake();
+    return settledPromise;
+  },
+  setInteractive,
+  whenSettled() { return settledPromise; },
+  diagnostics() {
+    return ready ? {
+      renderer: { revision: THREE.REVISION, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, pixelRatio: renderer.getPixelRatio() },
+      lights: scene.children.filter(n => n.isRectAreaLight).map(n => ({ name: n.name, width: n.width, height: n.height })),
+      ground: { receiver: floor?.receiveShadow, visible: floorRig?.visible },
+      shells: parts.filter(p => p.config.kind === 'shell').map(p => ({ name: p.config.name, casts: p.meshes.every(m => m.castShadow), receives: p.meshes.every(m => m.receiveShadow) })),
+    } : null;
+  },
 };
 initialize();

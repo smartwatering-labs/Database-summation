@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>离线配置入口 · 浇水</title>
+  <link rel="icon" href="/static/assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/offline-kit.css">
+  <script type="module" src="/static/offline-kit.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header><a href="/">返回主站</a><span class="tag">SWS-BLE 1.0</span></header>
+    <h1>离线配置入口</h1>
+    <p class="lead">打开本机配置文件，核对目标设备与版本，然后通过蓝牙发送。配置只留在当前页面内存中。</p>
+    <p id="cache-state" role="status">正在检查离线入口…</p>
+    <section><h2>1. 导入配置</h2>
+      <label class="file-label">选择 JSON 配置文件<input id="file" type="file" accept=".json,application/json"></label>
+      <dl id="config-summary"><div><dt>当前配置</dt><dd>尚未导入</dd></div></dl>
+      <button id="export" disabled>导出当前配置</button>
+    </section>
+    <section><h2>2. 连接设备</h2>
+      <details><summary>BLE UUID 设置</summary><div class="uuid-grid">
+        <label>服务 UUID<input id="service-uuid" value="2d26a7cc-1d45-4eae-9280-2a97346fd001"></label>
+        <label>写入 UUID<input id="write-uuid" value="2d26a7cc-1d45-4eae-9280-2a97346fd002"></label>
+        <label>通知 UUID<input id="notify-uuid" value="2d26a7cc-1d45-4eae-9280-2a97346fd003"></label>
+      </div></details>
+      <div class="buttons"><button id="connect">选择并连接设备</button><button id="disconnect" disabled>断开</button></div>
+      <label class="file-label">设备密钥凭据（按需）<input id="credential" type="file" accept=".json,application/json"></label>
+      <p id="credential-state">使用开发认证的设备可直接连接。</p>
+      <dl id="device-summary"><div><dt>设备</dt><dd>尚未连接</dd></div></dl>
+    </section>
+    <section><h2>3. 核对并发送</h2>
+      <p>连接后会读取设备当前 revision；写入结果以设备保存回执及必要时的读回核对为准。</p>
+      <div class="buttons"><button id="upload" disabled>发送到当前设备</button><button id="verify" disabled>读回核对待确认写入</button><button id="download" disabled>读取设备配置</button></div>
+      <p id="message" role="status" aria-live="polite">等待操作。</p>
+    </section>
+    <footer>此页面使用浏览器缓存启动；首次使用需在本地服务可用时打开。关闭或刷新页面会清除已导入配置。Web Bluetooth 需要兼容浏览器与安全上下文。</footer>
+  </main>
+</body>
+</html>

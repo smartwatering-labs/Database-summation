@@ -11,7 +11,7 @@ import threading
 import time
 from collections import Counter
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from functools import wraps
 from pathlib import Path
 
@@ -22,6 +22,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from engine.environment import EnvironmentService
 from engine.geocoding import GeocodingService
 from engine.location_catalog import LocationCatalog
+from engine.plant_library import SCHEMA_VERSION, empty_evidence, empty_review, empty_field_validation, empty_suitability, upgrade_plant_document
 from engine.rules import derive_parameters, validate_scenario, formula_catalog
 from engine.validation import ValidationError, number, text, validate_config
 
@@ -89,7 +90,14 @@ def create_app(test_config=None):
             existing = db.execute("SELECT 1 FROM library_documents WHERE name = ?", (name,)).fetchone()
             if existing is None:
                 seed = json.loads((ROOT / "knowledge_base" / f"{name}.json").read_text(encoding="utf-8"))
+                if name == "plants":
+                    seed, _ = upgrade_plant_document(seed)
                 db.execute("INSERT INTO library_documents VALUES (?,?,?,?,?)", (name, 1, json.dumps(seed, ensure_ascii=False), "seed", datetime.now(timezone.utc).isoformat()))
+        plant_row = db.execute("SELECT revision, data FROM library_documents WHERE name='plants'").fetchone()
+        upgraded, changed = upgrade_plant_document(json.loads(plant_row["data"]))
+        if changed:
+            db.execute("UPDATE library_documents SET revision=?, data=?, source=?, updatedAt=? WHERE name='plants'",
+                       (plant_row["revision"] + 1, json.dumps(upgraded, ensure_ascii=False), "schema-migration", datetime.now(timezone.utc).isoformat()))
 
     library_lock = threading.RLock()
 
@@ -216,6 +224,55 @@ def create_app(test_config=None):
                    "airWeight": number(value.get("airWeight"), "airWeight", 0, 1), "tags": [tag.strip() for tag in tags]}
         if not 0.98 <= cleaned["soilWeight"] + cleaned["tempWeight"] + cleaned["airWeight"] <= 1.02:
             raise ValidationError("三项植物权重之和必须为 1", "plant")
+        def fields(name, defaults, limits):
+            raw = value.get(name, defaults)
+            if not isinstance(raw, dict):
+                raise ValidationError(f"{name} 必须是对象", name)
+            if set(raw) - set(defaults):
+                raise ValidationError(f"{name} 包含未知字段", name)
+            return {key: text(raw.get(key, default), f"{name}.{key}", limits.get(key, 200), required=False)
+                    for key, default in defaults.items()}
+        evidence = fields("evidence", empty_evidence(), {"title": 160, "reference": 300, "referenceDate": 10,
+                                                           "conditions": 300, "cultivar": 100, "growthStage": 100,
+                                                           "medium": 100, "numericBasis": 500})
+        review = fields("review", empty_review(), {"status": 30, "reviewedAt": 10, "note": 300})
+        field_validation = fields("fieldValidation", empty_field_validation(),
+                                  {"status": 30, "testedAt": 10, "conditions": 300, "summary": 500})
+        for label, date_value in (("referenceDate", evidence["referenceDate"]), ("reviewedAt", review["reviewedAt"]),
+                             ("testedAt", field_validation["testedAt"])):
+            if date_value:
+                try:
+                    if date.fromisoformat(date_value).isoformat() != date_value:
+                        raise ValueError()
+                except ValueError:
+                    raise ValidationError(f"{label} 应为 YYYY-MM-DD 日期", label)
+        if review["status"] not in ("engineering", "reviewed", "uncertain", "retired"):
+            raise ValidationError("资料审核状态无效", "review.status")
+        if field_validation["status"] not in ("untested", "calibrated", "trial"):
+            raise ValidationError("实物验证状态无效", "fieldValidation.status")
+        if review["status"] == "reviewed" and not (evidence["title"] and evidence["reference"] and review["reviewedAt"]):
+            raise ValidationError("资料已核对时须填写来源标题、引用与核对日期", "review")
+        if field_validation["status"] != "untested" and not (field_validation["testedAt"] and field_validation["summary"]):
+            raise ValidationError("实物验证须填写日期和结果摘要", "fieldValidation")
+        suitability = value.get("suitability", empty_suitability())
+        if not isinstance(suitability, dict) or set(suitability) - set(empty_suitability()):
+            raise ValidationError("适配范围格式无效", "suitability")
+        suitability = {**empty_suitability(), **suitability}
+        if suitability["context"] not in ("outdoor", "indoor", "greenhouse"):
+            raise ValidationError("适配场景无效", "suitability.context")
+        for lower_key, upper_key, low, high in (("temperatureMinC", "temperatureMaxC", -40, 70),
+                                                ("humidityMinPct", "humidityMaxPct", 0, 100)):
+            lower, upper = suitability[lower_key], suitability[upper_key]
+            if (lower is None) != (upper is None):
+                raise ValidationError("适配范围须同时填写上下限", "suitability")
+            if lower is not None:
+                number(lower, "适配范围下限", low, high)
+                number(upper, "适配范围上限", low, high)
+                if lower >= upper:
+                    raise ValidationError("适配范围上限须高于下限", "suitability")
+                if review["status"] == "engineering":
+                    raise ValidationError("适配范围须先完成资料审核", "suitability")
+        cleaned.update(evidence=evidence, review=review, fieldValidation=field_validation, suitability=suitability)
         return cleaned
 
     def git_state():
@@ -237,19 +294,30 @@ def create_app(test_config=None):
             return render_template("admin.html")
         return render_template("index.html")
 
+    @app.get("/offline-kit")
+    def offline_kit():
+        return render_template("offline-kit.html")
+
+    @app.get("/offline-sw.js")
+    def offline_sw():
+        return app.send_static_file("offline-sw.js")
+
     @app.get("/api/settings")
     def settings():
         return jsonify(status="ok", protocol="SWS-BLE", protocolVersion="1.0", configVersion="1.0",
                        development=app.config["APP_ENV"] != "production", demoEnabled=app.config["DEMO_ENABLED"],
                        builtinFlowMlSec=library_document("environment_weights")["flowRateMlSec"],
+                       supportedConfigVersions=["1.0", "2.0"],
                        ble={"serviceUuid": os.getenv("BLE_SERVICE_UUID", "2d26a7cc-1d45-4eae-9280-2a97346fd001"),
                             "writeUuid": os.getenv("BLE_WRITE_UUID", "2d26a7cc-1d45-4eae-9280-2a97346fd002"),
                             "notifyUuid": os.getenv("BLE_NOTIFY_UUID", "2d26a7cc-1d45-4eae-9280-2a97346fd003"),
-                            "profile": "sws-json-v1", "verified": False, "firmwareVersion": "3.4.0"})
+                            "profile": "sws-json-v1", "verified": False, "firmwareVersion": "3.6.0"})
 
     @app.get("/api/plants")
     def plant_library():
-        return jsonify(status="ok", **library_document("plants"))
+        document = library_document("plants")
+        document["items"] = [item for item in document["items"] if item.get("review", {}).get("status") != "retired"]
+        return jsonify(status="ok", **document)
 
     location_signer = URLSafeTimedSerializer(app.config["LOCATION_TOKEN_SECRET"], salt="external-location-v2")
     catalog_signer = URLSafeTimedSerializer(app.config["LOCATION_TOKEN_SECRET"], salt="location-catalog-v1")
@@ -309,7 +377,7 @@ def create_app(test_config=None):
     @app.post("/api/configurations/generate")
     def generate():
         libraries = current_libraries()
-        plants = {row["id"]: row for row in libraries["plants"]["items"]}
+        plants = {row["id"]: row for row in libraries["plants"]["items"] if row.get("review", {}).get("status") != "retired"}
         data = json_object()
         location = verified_location(data)
         scene = validate_scenario(dict(data, customLocation=location), plants, libraries["environment_weights"]["flowRateMlSec"])
@@ -394,7 +462,7 @@ def create_app(test_config=None):
             items.append(plant)
         else:
             items[index] = plant
-        stored = {"provenance": "管理员维护的数据库植物参数；发布前应完成来源核对与实物标定", "items": items}
+        stored = {"schemaVersion": SCHEMA_VERSION, "provenance": document.get("provenance", "公共植物参数库"), "items": items}
         updated = update_library("plants", stored, expected_revision, source)
         log("info", "plant_library_updated", f"植物库已更新至 {updated['version']}；植物 ID：{plant['id']}")
         return jsonify(status="ok", **updated)

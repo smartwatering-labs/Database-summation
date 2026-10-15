@@ -28,8 +28,9 @@ def validate_config(config, current_revision=None):
         raise ValidationError("配置必须是 JSON 对象")
     if config.get("deviceModel") != "ESP32-WATER-C3":
         raise ValidationError("设备型号必须为 ESP32-WATER-C3", "deviceModel")
-    if config.get("configVersion") != "1.0":
-        raise ValidationError("不支持此配置格式版本，仅接受 1.0", "configVersion")
+    version = config.get("configVersion")
+    if version not in ("1.0", "2.0"):
+        raise ValidationError("不支持此配置格式版本，仅接受 1.0 或 2.0", "configVersion")
     if config.get("protocolVersion", "1.0") != "1.0":
         raise ValidationError("不支持此协议版本", "protocolVersion")
     revision = number(config.get("revision"), "revision", 1, 2147483647, True)
@@ -50,12 +51,19 @@ def validate_config(config, current_revision=None):
         number(params.get(key), key, low, high, integer)
     if params["pulseCount"] * (params["pulseOnMs"] + params["pulseOffMs"]) > 360000:
         raise ValidationError("单轮脉冲总时长不得超过文档中的 6 分钟保护窗口", "params")
+    if version == "2.0":
+        target = text(config.get("targetDeviceId"), "targetDeviceId", 64)
+        if not all(ch.isascii() and (ch.isalnum() or ch in "-_") for ch in target):
+            raise ValidationError("目标设备 ID 格式无效", "targetDeviceId")
+        number(params.get("minWaterIntervalSeconds"), "minWaterIntervalSeconds", 3600, 2592000, True)
     # Permit only documented metadata. Auth/secret/signature are created by the device
     # protocol, never trusted from imported files or retained in exported files.
     keys = ("revision", "timestamp", "configVersion", "protocolVersion", "deviceModel", "plant", "plantId",
             "country", "locationName", "locationCode", "postalCode", "climateZone", "season", "source",
             "sourceVersion", "generatedAt", "wateringStrategy", "waterNeedMlDay", "recommendedMode", "supplyVariant")
     clean = {k: config[k] for k in keys if k in config}
+    if version == "2.0":
+        clean["targetDeviceId"] = target
     for key, value in clean.items():
         if key not in ("revision", "timestamp", "waterNeedMlDay"):
             text(value, key, 200, required=False)
@@ -68,6 +76,8 @@ def validate_config(config, current_revision=None):
     if clean.get("supplyVariant", "builtin") not in ("builtin", "valve"):
         raise ValidationError("供水变体不合法", "supplyVariant")
     clean["params"] = {k: params[k] for k in ("soilWeight", "tempWeight", "airWeight", "threshold", "pulseCount", "pulseOnMs", "pulseOffMs")}
+    if version == "2.0":
+        clean["params"]["minWaterIntervalSeconds"] = params["minWaterIntervalSeconds"]
     display = config.get("display", {})
     if not isinstance(display, dict):
         raise ValidationError("display 必须是对象", "display")
@@ -78,4 +88,20 @@ def validate_config(config, current_revision=None):
     for key in ("plant", "source", "irrigationMethod"):
         if key in display:
             clean["display"][key] = text(display[key], key)
+    reference = config.get("environmentReference")
+    if reference is not None:
+        if version != "2.0" or not isinstance(reference, dict) or reference.get("context") not in ("outdoor", "indoor", "greenhouse"):
+            raise ValidationError("环境参考需使用 2.0 格式及有效种植位置", "environmentReference")
+        clean_reference = {"context": reference["context"], "title": text(reference.get("title"), "参考标题", 200),
+                           "reference": text(reference.get("reference"), "参考来源", 300)}
+        for prefix, low, high in (("temperature", -20, 60), ("humidity", 0, 100)):
+            unit = "C" if prefix == "temperature" else "Pct"
+            min_key, max_key = prefix + "Min" + unit, prefix + "Max" + unit
+            if reference.get(min_key) is not None or reference.get(max_key) is not None:
+                minimum = number(reference.get(min_key), min_key, low, high)
+                maximum = number(reference.get(max_key), max_key, minimum, high)
+                clean_reference.update({min_key: minimum, max_key: maximum})
+        if len(clean_reference) == 3:
+            raise ValidationError("环境参考至少需要一组完整范围", "environmentReference")
+        clean["environmentReference"] = clean_reference
     return clean

@@ -14,24 +14,51 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict');
    const before=await orientation();await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+dx,y+dy,{steps:10});
    if(back)await page.mouse.move(x,y,{steps:10});
    await page.mouse.up();await settled();
-   return page.evaluate(async({before})=>{
-    const {Quaternion}=await import('/static/vendor/three/build/three.module.js');
-    const start=new Quaternion().fromArray(before.split(',').map(Number)),end=new Quaternion().fromArray(document.querySelector('#model-stage').dataset.orientation.split(',').map(Number));
-    return end.multiply(start.invert()).toArray();
-   },{before});
+   return { before, after: await orientation() };
   };
-  // Relative screen-space axes stay consistent even after many changed orientations.
-  for(let i=0;i<3;i++){
-   const horizontal=await drag(110,6);assert.ok(horizontal[1]>.1,`right drag turns right: ${horizontal}`);assert.ok(Math.abs(horizontal[0])<.0001&&Math.abs(horizontal[2])<.0001,'horizontal jitter does not pitch or roll');
-   const vertical=await drag(6,90);assert.ok(vertical[0]>.1,'down drag tilts down');assert.ok(Math.abs(vertical[1])<.0001&&Math.abs(vertical[2])<.0001,'vertical jitter does not yaw or roll');
-  }
-  const reverse=await drag(-110,4);assert.ok(reverse[1]<-.1,'left drag reverses the screen direction');
-  const returnPath=await drag(140,60,true);assert.ok(Math.abs(returnPath[3])>.999999,'retracing a gesture returns exactly without accumulated roll');
-  const diagonal=await drag(90,90);assert.ok(diagonal[0]>.1&&diagonal[1]>.1,'diagonal drag remains available');
+  const reset=async()=>{await canvas.focus();await page.keyboard.press('Home');await settled();};
+  const same=(a,b)=>Math.abs(a.split(',').map(Number).reduce((sum,n,i)=>sum+n*Number(b.split(',')[i]),0))>1-1e-10;
+  const frontMovement=async result=>page.evaluate(async({before,after})=>{
+   const {Quaternion,Vector3}=await import('/static/vendor/three/build/three.module.js');
+   const start=new Quaternion().fromArray(before.split(',').map(Number)),end=new Quaternion().fromArray(after.split(',').map(Number));
+   // Track the surface facing the camera, rather than assuming quaternion signs
+   // describe the direction a user sees on screen.
+   const front=new Vector3(0,0,1).applyQuaternion(start.invert()).applyQuaternion(end);
+   return {x:front.x,y:front.y};
+  },result);
+  assert.ok((await frontMovement(await drag(100,0))).x>.15,'right drag moves the camera-facing surface right');
+  await reset();assert.ok((await frontMovement(await drag(0,100))).y<-.15,'down drag moves the camera-facing surface down, including from the exact top view');
+  await reset();
+  // A turntable keeps independent yaw/tilt values. Changing gesture order must
+  // reach the same orientation, including after yaw crosses 90 and 180 degrees.
+  await drag(100,6);await drag(6,90);const xy=await orientation();
+  await reset();await drag(6,90);await drag(100,6);
+  assert.ok(same(xy,await orientation()),'horizontal and vertical drags use independent fixed axes');
+  await reset();await drag(390,0);const yawOnly=await orientation();
+  await drag(0,110);await drag(0,-110);
+  assert.ok(same(yawOnly,await orientation()),'tilt out and back preserves yaw beyond 90 degrees');
+  await drag(390,0);const rotated=await orientation();
+  const reverse=await drag(-110,4);await drag(110,4);
+  assert.ok(same(rotated,await orientation()),'reverse yaw returns after more than half a turn');
+  assert.ok(!same(reverse.before,reverse.after));
+  const returnPath=await drag(140,60,true);assert.ok(same(returnPath.before,returnPath.after),'retracing a gesture returns exactly');
+  await reset();await drag(120,0);await drag(0,80);const twoAxes=await orientation();
+  await reset();await drag(120,80);
+  assert.ok(same(twoAxes,await orientation()),'diagonal drag composes the same fixed axes without free roll');
+  await drag(0,1200);const clamped=await orientation();await drag(0,300);
+  assert.ok(same(clamped,await orientation()),'pitch stops at the inspection range limit');
   const stopped=await orientation();await page.waitForTimeout(300);assert.equal(await orientation(),stopped,'release settles without long coasting');
   await canvas.focus();await page.keyboard.press('Home');await settled();assert.equal(await orientation(),home);
   await page.keyboard.press('ArrowRight');await settled();assert.notEqual(await orientation(),home);
   await page.getByRole('button',{name:'返回配置面板',exact:true}).click();await settled();assert.equal(await orientation(),home,'panel restore still returns to the saved pose');
-  assert.deepEqual(errors,[]);console.log('PASS: consistent screen axes after repeated rotations, hand-jitter rejection, reverse/diagonal/retraced drags, short settling, keyboard and panel restore');
+  await page.evaluate(()=>location.hash='device');await page.waitForFunction(()=>document.querySelector('#main').dataset.route==='device'&&!document.querySelector('#main').inert);
+  await page.getByRole('button',{name:'查看 3D 模型',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#main').dataset.surfaceMoving==='false');
+  const gentle=await drag(2,1),start=gentle.before.split(',').map(Number),end=gentle.after.split(',').map(Number);
+  const angle=2*Math.acos(Math.min(1,Math.abs(start.reduce((sum,n,i)=>sum+n*end[i],0))));
+  assert.ok(angle<.03,'first small gesture continues from the default view without an orientation jump');
+  await reset();
+  assert.ok((await frontMovement(await drag(100,0))).x>.15,'hardware page also follows rightward pointer movement');
+  await reset();assert.ok((await frontMovement(await drag(0,100))).y<-.15,'hardware page also follows downward pointer movement');
+  assert.deepEqual(errors,[]);console.log('PASS: fixed-axis turntable, order-independent yaw/tilt, yaw beyond 180 degrees, pitch limit, reverse/retraced drag, no coasting, keyboard and panel restore');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1)});

@@ -6,6 +6,18 @@ function disclosure(parent,nodes,title,label,id){
  const button=document.createElement('button');button.type='button';button.className='button disclosure-button';button.dataset.detail=id;
  button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-controls','detail-dialog');button.innerHTML=`<span>${label}</span>${icon('arrow',17)}`;parent.append(button);return button;
 }
+function informationIndex(sections,label){
+ const panel=document.createElement('section');panel.className='hero-index-panel';panel.setAttribute('aria-label',label);
+ const list=document.createElement('ol');list.className='hero-index';
+ sections.forEach((section,i)=>{
+  const {detailSection:id,label:title,summary}=section.dataset;details.set(id,{title,html:section.innerHTML});
+  const item=document.createElement('li'),button=document.createElement('button');button.type='button';button.className='detail-row';button.dataset.detail=id;
+  button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-controls','detail-dialog');button.setAttribute('aria-label',title);
+  button.innerHTML=`<span class="index-number" aria-hidden="true">${String(i+1).padStart(2,'0')}</span><span class="index-copy"><strong>${title}</strong><span>${summary}</span></span>${icon('arrow',17)}`;
+  item.append(button);list.append(item);
+ });
+ panel.append(list);return panel;
+}
 function openDetails(id,trigger){
  const detail=details.get(id);if(!detail)return;returnFocus=trigger;closing=false;closeVersion++;dialog.classList.remove('is-closing');
  document.querySelector('#detail-title').textContent=detail.title;const body=document.querySelector('#detail-body');body.innerHTML=detail.html;
@@ -33,37 +45,32 @@ export function enhancePage(main,route){
   const panel=document.createElement('section');panel.className='workspace-panel';panel.id='workspace-panel';panel.setAttribute('aria-label',route==='configure'?'个性化配置面板':'硬件状态面板');
   const scroll=document.createElement('div');scroll.className='panel-scroll';scroll.tabIndex=0;scroll.setAttribute('role','region');scroll.setAttribute('aria-label',route==='configure'?'配置内容，可滚动':'设备内容，可滚动');
   while(main.firstChild)scroll.append(main.firstChild);panel.append(scroll);main.append(panel);
-  const note=document.createElement('p');note.textContent=route==='configure'?'外壳已展开，内部芯片位置暂留空；后续随正式模型补充':'外壳已合拢，设备数据以蓝牙握手后读取的实际状态为准';
+  const note=document.createElement('p');note.textContent=route==='configure'?'顶盖已移除，正上方查看主板和实际元器件。':'外壳已移除，侧向查看两层主板；设备数据以蓝牙握手后读取的实际状态为准';
   const tools=document.createElement('div');tools.className='workspace-tools';
   const label=document.createElement('span');label.className='workspace-label';label.textContent=route==='configure'?'场景设定 → 配置预览':'设备状态 · 数据与操作';
   const info=document.createElement('div');info.className='workspace-caption';disclosure(info,[note],route==='configure'?'内部结构':'硬件模型','查看结构说明','structure');
   const toggle=document.createElement('button');toggle.type='button';toggle.className='button outline panel-toggle';toggle.dataset.panelToggle='';toggle.setAttribute('aria-controls','workspace-panel');toggle.setAttribute('aria-expanded','true');toggle.innerHTML=`${icon('device',16)}<span>查看 3D 模型</span>${icon('arrow',16)}`;
-  tools.append(label,info,toggle);const hint=document.createElement('p');hint.className='model-view-hint';hint.textContent='拖动旋转模型 · 展开面板后自动归位';main.append(tools,hint);return;
+  tools.append(label,info,toggle);const hint=document.createElement('p');hint.className='model-view-hint';hint.textContent=matchMedia('(pointer:coarse)').matches?'单指旋转 · 双指缩放 · 双击归位':'拖动旋转 · 滚轮缩放 · 双击归位';main.append(tools,hint);return;
  }
- const hero=document.createElement('section');hero.className='hero-page';hero.setAttribute('aria-label',route==='home'?'浇水系统展示':'产品介绍与使用说明');
- const buttons=document.createElement('div');buttons.className='hero-hotspots';
- const footer=document.createElement('div');footer.className='hero-footer';
+ const hero=document.createElement('section');hero.className=`hero-page ${route==='home'?'home-hero':'product-hero'}`;hero.setAttribute('aria-label',route==='home'?'浇水系统展示':'产品介绍与使用说明');
+ const index=informationIndex(Array.from(main.querySelectorAll('[data-detail-section]')),route==='home'?'从这里开始':'了解产品');
+ const visual=document.createElement('figure');visual.className='hero-visual-region';
+ visual.setAttribute('aria-label',route==='home'?'浇水设备完整外观':'顶盖、上层主板、下层主板与底壳的分解视图');
+ visual.innerHTML=route==='home'?'<figcaption><strong>智能浇水设备</strong><span>双层结构 · 蓝牙配置 · 独立运行</span></figcaption>':'<figcaption><strong>由外而内，理解每一层</strong><span>顶盖 / 上层主板 / 下层主板 / 底壳</span></figcaption>';
  if(route==='home'){
   const heading=main.querySelector('.home-heading');heading.classList.add('hero-copy');
-  const copy=main.querySelector('.hardware-copy');
-  disclosure(buttons,[copy],'感知环境，按需浇灌','硬件组成','hardware');
-  disclosure(buttons,[main.querySelector('.home-notices')],'蓝牙兼容与设备唤醒','连接须知','connection');
-  disclosure(buttons,[main.querySelector('.quick-section')],'你的工作区','进入工作区','workspace');
+  const stack=document.createElement('aside');stack.className='hero-side-stack';stack.setAttribute('aria-label','开始使用');
   const demo=main.querySelector('.demo-entry');
-  if(demo){const button=demo.querySelector('button');button.classList.add('hero-demo');footer.append(button);}
-  const note=document.createElement('span');note.textContent='连接前，请先按外置按钮唤醒设备';footer.prepend(note);hero.append(heading);
+  stack.append(index);
+  if(demo){const button=demo.querySelector('button');button.classList.add('hero-demo');stack.append(button);}
+  const content=document.createElement('div');content.className='hero-content';content.append(heading,stack);hero.append(content,visual);
  }else{
-  const heading=main.querySelector('.page-heading');heading.classList.add('hero-product-heading');
-  const intro=main.querySelector('.product-intro>div');
-  const copy=document.createElement('div');copy.className='hero-copy product-copy';copy.append(intro.querySelector('h2'));
-  disclosure(buttons,Array.from(intro.querySelectorAll('p')),'产品用途与工作原理','工作原理','principle');
-  disclosure(buttons,[main.querySelector('.workflow')],'从环境感知到节水执行','运行流程','workflow');
-  disclosure(buttons,[main.querySelector('.mode-explanations')],'三种运行模式','运行模式','modes');
-  disclosure(buttons,[main.querySelector('.guide-rows'),main.querySelector('.notice.warning')],'首次使用与实物校准','首次使用','guide');
+  const intro=main.querySelector('.product-copy-source');
+  const copy=document.createElement('div');copy.className='hero-copy product-copy';copy.append(...intro.childNodes,index);
   const actions=main.querySelector('.actions.content-section');actions.classList.remove('content-section');copy.append(actions);
-  const note=document.createElement('span');note.textContent='感知环境 · 按需浇灌';footer.append(note);hero.append(heading,copy);
+  hero.append(copy,visual);
  }
- hero.append(buttons,footer);main.replaceChildren(hero);
+ main.replaceChildren(hero);
 }
 
 const rail=document.querySelector('#sidebar'),toggle=document.querySelector('#sidebar-toggle');

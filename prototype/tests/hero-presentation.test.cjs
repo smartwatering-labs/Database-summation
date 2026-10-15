@@ -20,8 +20,19 @@ const out=path.resolve('test-results/hero');fs.mkdirSync(out,{recursive:true});
   assert.match(await page.locator('#detail-body').innerText(),/ESP32-C3/);await page.screenshot({path:path.join(out,'details.png')});await page.keyboard.press('Escape');await page.locator('#detail-dialog').waitFor({state:'hidden'});
   for(const from of ['home','product','configure','device'])for(const to of ['home','product','configure','device'].filter(r=>r!==from)){
    await go(from);await go(to);assert.ok(await page.evaluate(()=>window.originalCanvas===document.querySelector('#model-canvas')));
-   assert.ok(Math.abs(Number(await page.locator('#model-stage').getAttribute('data-open'))-(to==='configure'?1:0))<.002);
+   assert.ok(Math.abs(Number(await page.locator('#model-stage').getAttribute('data-open'))-(['configure','product'].includes(to)?1:0))<.002);
   }
+  await go('home');
+  const opening=await page.evaluate(()=>new Promise(resolve=>{
+   const samples=[],start=performance.now();location.hash='product';
+   function sample(){const node=document.querySelector('#model-stage');if(node.dataset.route==='product')samples.push(Number(node.dataset.open));
+    if(performance.now()-start<700)requestAnimationFrame(sample);else resolve(samples);}
+   requestAnimationFrame(sample);
+  }));
+  assert.ok(opening.length>=8&&opening.some(n=>n>.1&&n<.9),'explosion animates through intermediate poses');
+  assert.ok(opening.every((n,i)=>!i||n>=opening[i-1]-.002),'explosion opens continuously without reversing');
+  assert.ok(Math.max(...opening.slice(1).map((n,i)=>n-opening[i]))<.2,'explosion does not jump a large fraction in one frame');
+  await settled('product');
   await page.evaluate(async()=>{for(const route of ['home','configure','product','configure','device']){location.hash=route;await new Promise(r=>setTimeout(r,70));}});await settled('device');
   await page.getByRole('button',{name:'收起侧边栏'}).click();await page.waitForTimeout(750);
   assert.ok(await page.locator('#sidebar').evaluate(n=>n.inert));assert.ok((await page.locator('.main-shell').boundingBox()).x<2);

@@ -89,14 +89,85 @@ export async function authentication(nonce) {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
+export function validateCredential(value){
+  if(!value||typeof value.deviceId!=='string'||! /^[A-Za-z0-9_-]{1,64}$/.test(value.deviceId)
+    ||typeof value.secret!=='string'||! /^[a-fA-F0-9]{64}$/.test(value.secret)
+    ||(value.role!=null&&!['owner','operator','viewer'].includes(value.role)))throw new Error('设备凭据需要设备 ID、有效角色与 256 位十六进制密钥');
+  return {deviceId:value.deviceId,secret:value.secret.toLowerCase(),role:value.role||'owner'};
+}
+export async function hmac256(secret,value){
+  if(!/^[a-fA-F0-9]{64}$/.test(secret||''))throw new Error('设备密钥格式无效');
+  const bytes=Uint8Array.from(secret.match(/../g),value=>parseInt(value,16));
+  const key=await crypto.subtle.importKey('raw',bytes,{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  const digest=await crypto.subtle.sign('HMAC',key,encoder.encode(value));
+  return Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
+}
+function equalDigest(left,right){if(typeof left!=='string'||typeof right!=='string'||left.length!==64||right.length!==64)return false;let difference=0;for(let i=0;i<64;i++)difference|=left.charCodeAt(i)^right.charCodeAt(i);return difference===0;}
+export async function handshakeAuthentication(handshake,credential){
+  const profile=handshake.authProfile||'development';
+  if(profile==='development')return {auth:await authentication(handshake.nonce),security:null};
+  if(profile!=='hmac-sha256-v1')throw new Error('设备认证方式不兼容');
+  const clean=validateCredential(credential);
+  if(clean.deviceId!==handshake.deviceId)throw new Error('凭据对应另一台设备');
+  const binding=handshake.deviceId+'|'+handshake.nonce;
+  const proof=clean.role==='owner'?handshake.deviceProof:handshake.deviceProofs?.[clean.role];
+  if(!equalDigest(proof,await hmac256(clean.secret,'device|'+binding)))throw new Error('设备身份校验失败，请核对设备与凭据');
+  const rolePrefix=clean.role==='owner'?'':clean.role+'|';
+  return {auth:await hmac256(clean.secret,'client|'+rolePrefix+binding),security:{...clean,nonce:handshake.nonce,sequence:0}};
+}
+export async function secureMessage(message,security,role,sequence){
+  const bytes=encoder.encode(JSON.stringify(message));
+  const body=btoa(String.fromCharCode(...bytes));
+  return {sequence,body,mac:await hmac256(security.secret,`${role}|${security.deviceId}|${security.nonce}|${sequence}|${body}`)};
+}
+export async function readSecureMessage(envelope,security,role,sequence){
+  if(envelope?.sequence!==sequence||typeof envelope.body!=='string'||envelope.body.length>12000
+    ||!equalDigest(envelope.mac,await hmac256(security.secret,`${role}|${security.deviceId}|${security.nonce}|${sequence}|${envelope.body}`)))throw new Error('设备消息身份或完整性校验失败');
+  const bytes=Uint8Array.from(atob(envelope.body),char=>char.charCodeAt(0));
+  return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
+}
+
 export function validateStatus(value, deviceId) {
   if (value?.protocol !== PROTOCOL || value?.protocolVersion !== VERSION || value?.deviceId !== deviceId) throw new Error('设备状态来源或协议不匹配');
   if (!['DISPLAY', 'PREPARE', 'LONGRUN'].includes(value.mode) || !Number.isInteger(value.configRevision) || value.configRevision < 0) throw new Error('设备状态格式无效');
   const s = value.sample;
   if (s != null) {
-    for (const [key, min, max] of [['temperatureC', -60, 100], ['humidityPct', 0, 100], ['soilAdc', 0, 4095], ['rainAdc', 0, 4095], ['wateringDemand', 0, 100]]) {
+    for (const [key, min, max] of [['temperatureC', -60, 100], ['humidityPct', 0, 100], ['soilAdc', 0, 4095], ['rainAdc', 0, 4095], ['wateringDemand', 0, 100], ['solarVoltageV', 0, 30]]) {
+      if (key === 'solarVoltageV' && s[key] === undefined) continue;
       if (s[key] !== null && (typeof s[key] !== 'number' || !Number.isFinite(s[key]) || s[key] < min || s[key] > max)) throw new Error('设备采样数据无效：' + key);
     }
+    if (s.sampleSeq != null && (!Number.isInteger(s.sampleSeq) || s.sampleSeq < 0 || !Number.isInteger(s.bootCount) || s.bootCount < 0)) throw new Error('采样身份无效');
+    if (s.timeQuality != null && !['trusted', 'relative', 'unknown'].includes(s.timeQuality)) throw new Error('采样时间质量无效');
+    if (s.quality != null) {
+      if (typeof s.quality !== 'object' || Array.isArray(s.quality)) throw new Error('通道质量格式无效');
+      for (const [key, item] of Object.entries(s.quality)) {
+        if (!['temperatureC', 'humidityPct', 'soilAdc', 'rainAdc', 'solarVoltageV'].includes(key)
+          || !item || typeof item !== 'object' || !['valid', 'suspect', 'stale', 'invalid', 'unconfigured', 'missing'].includes(item.status)
+          || (item.reason != null && (typeof item.reason !== 'string' || item.reason.length > 80))) throw new Error('通道质量格式无效');
+        if (['suspect', 'invalid', 'unconfigured', 'missing'].includes(item.status) && s[key] != null) throw new Error('无效通道不能携带有效读数：' + key);
+      }
+    }
+  }
+  return value;
+}
+
+export function validateEventPage(value, deviceId) {
+  if (value?.deviceId !== deviceId || !Array.isArray(value.records) || value.records.length > 24
+    || (value.nextCursor != null && (typeof value.nextCursor !== 'string' || value.nextCursor.length > 100))) throw new Error('事件分页格式或来源无效');
+  for (const event of value.records) {
+    const validTime = time => time == null || time === 0 || (typeof time === 'number' && Number.isInteger(time) && time > 0)
+      || (typeof time === 'string' && time.length <= 40 && Number.isFinite(Date.parse(time)));
+    if (!event || typeof event.eventId !== 'string' || !event.eventId || event.eventId.length > 80
+      || (event.deviceId != null && event.deviceId !== deviceId)
+      || (event.bootCount != null && (!Number.isInteger(event.bootCount) || event.bootCount < 0))
+      || (event.eventSeq != null && (!Number.isInteger(event.eventSeq) || event.eventSeq < 0))
+      || typeof event.code !== 'string' || !event.code || event.code.length > 80
+      || !['info', 'warning', 'critical'].includes(event.severity)
+      || !Number.isInteger(event.configRevision) || event.configRevision < 0
+      || (event.sensorKey != null && !['temperatureC', 'humidityPct', 'soilAdc', 'rainAdc', 'solarVoltageV'].includes(event.sensorKey))
+      || (event.controlImpact != null && (typeof event.controlImpact !== 'string' || event.controlImpact.length > 160))
+      || (event.timeQuality != null && !['trusted', 'relative', 'unknown'].includes(event.timeQuality))
+      || !validTime(event.occurredAt) || !validTime(event.recoveredAt)) throw new Error('设备事件格式无效');
   }
   return value;
 }

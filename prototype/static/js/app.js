@@ -1,4 +1,6 @@
 import { api, exportConfig } from './services/api.js';
+import { importedConfigResult } from './services/config-file.js';
+import { validateCredential } from './services/protocol.js';
 import './variable-proximity.js';
 import { enhancePage, closeDetails } from './presentation.js';
 import { modelStage } from './model-stage.js';
@@ -8,18 +10,18 @@ import './theme.js';
 import { DeviceController } from './services/device.js';
 import { home } from './pages/home.js';
 import { product } from './pages/product.js';
-import { configure, resultPanel, countryMatches, countryOptions } from './pages/configure.js';
+import { configure, connectivityPanel, resultPanel, countryMatches, countryOptions } from './pages/configure.js';
 import { devicePage } from './pages/device.js';
 import { button, icon, escape as e, drawChart, modes } from './ui.js';
 
 const device = new DeviceController();
 const state = {
   settings: { demoEnabled: false, ble: {} }, plants: { items: [] },
-  scene: { plantId:'tomato', locationToken:'', cultivation:'pot', potLiters:10, light:'partial', season:'autumn', supplyVariant:'builtin', reservoirLiters:20, flowRateMlSec:null, waterSource:'储水桶，已接好水泵与供水管' },
+  scene: { plantId:'tomato', locationToken:'', cultivation:'pot', siteType:'outdoor', potLiters:10, light:'partial', season:'autumn', supplyVariant:'builtin', reservoirLiters:20, flowRateMlSec:null, waterSource:'储水桶，已接好水泵与供水管',siteTemperatureC:null,siteHumidityPct:null,siteObservedLocal:'' },
   place:{countries:[],country:null,province:null,city:null,provinces:[],cities:[],countryText:'',countryOpen:false,active:-1,countriesLoading:false,countryError:''},
-  result:null, dirty:false, generating:false, environment:null, environmentLoading:false, historyOpen:false, historyPage:0,
+  result:null, resultTargetDeviceId:null, dirty:false, generating:false, environment:null, environmentLoading:false, historyOpen:false, historyPage:0, eventsOpen:false, eventsPage:0, eventsLoading:false,
   selectedLocation:null, locationCandidates:[], locationLoading:false, locationError:'', environmentError:'',
-  ready:false, deviceError:'', writeResult:null,
+  ready:false, backendReachable:null, backendCheckedAt:null, deviceError:'', writeResult:null, revealConfiguration:false,
 };
 const pages = {home:['首页','home',home],product:['产品介绍','leaf',product],configure:['个性化库编译','settings',configure],device:['硬件情况查看','device',devicePage]};
 const main = document.querySelector('#main'), dialog = document.querySelector('#dialog');
@@ -82,7 +84,28 @@ function updateChrome() {
 function render() {
   if (!state.ready) return;
   const savedScroll=main.dataset.route===route?(main.querySelector('.panel-scroll')?.scrollTop||0):0;
+  const retainedControls=route==='device'&&main.dataset.route===route&&device.state==='ready'
+    &&main.dataset.deviceGeneration===String(device.generation)?main.querySelector('.device-controls'):null;
   main.innerHTML = pages[route][2](state, device);
+  const freshControls=main.querySelector('.device-controls');
+  if(retainedControls&&freshControls){
+    const previous=retainedControls.querySelector('#target-mode'),fresh=freshControls.querySelector('#target-mode');
+    const selected=previous?.value===retainedControls.dataset.mode?fresh?.value:previous?.value;
+    if(previous&&fresh){
+      const options=node=>JSON.stringify([...node.options].map(option=>[option.value,option.textContent]));
+      if(options(previous)!==options(fresh))previous.innerHTML=fresh.innerHTML;
+      previous.value=[...previous.options].some(option=>option.value===selected)?selected:fresh.value;
+      previous.disabled=fresh.disabled;
+    }
+    retainedControls.querySelectorAll('button[data-action]').forEach(node=>{
+      const replacement=freshControls.querySelector(`[data-action="${node.dataset.action}"]`);
+      if(replacement)node.disabled=replacement.disabled;
+    });
+    retainedControls.querySelector('[data-current-mode]').textContent=freshControls.querySelector('[data-current-mode]').textContent;
+    freshControls.replaceWith(retainedControls);
+  }
+  const controls=main.querySelector('.device-controls');if(controls)controls.dataset.mode=device.status.mode;
+  main.dataset.deviceGeneration=String(device.generation);
   main.dataset.route=route;
   document.title = pages[route][0] + ' · 浇水'; updateChrome(); updateLocks();
   enhancePage(main, route);
@@ -169,7 +192,9 @@ async function selectCountry(code) {
 function updateResult() {
   const result = document.querySelector('#configuration-result');
   if (result) result.innerHTML = resultPanel(state, device);
+  updateConnectivity();
 }
+function updateConnectivity(){document.querySelector('#connectivity-panel')?.replaceWith(document.createRange().createContextualFragment(connectivityPanel(state,device)));}
 function updateLocks() {
   document.querySelectorAll('#scenario-form input,#scenario-form select,#scenario-form textarea').forEach(node=>{ node.disabled = state.generating || node.dataset.unavailable==='true'; });
 }
@@ -196,16 +221,19 @@ async function navigate() {
   const version=++navigationVersion,reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
   const changing=!!main.dataset.route&&main.dataset.route!==next;
   closeDetails();closeMenu();main.inert=true;
-  const movement=modelStage.update(next,false);
-  if(changing&&!reduce){await surfaceMotion.hide();if(version!==navigationVersion)return;}
-  surfaceMotion.setPage(next);
+  surfaceMotion.setPage(next,changing&&!reduce);
   route=next;render();window.scrollTo({top:0,behavior:'instant'});
+  const movement=modelStage.whenSettled();
   if(route==='configure'&&!state.place.countries.length&&!state.place.countriesLoading&&!state.place.countryError)loadCountries();
   if(changing&&!reduce)await movement;
   if(version!==navigationVersion)return;
   await surfaceMotion.reveal(changing&&!reduce);if(version!==navigationVersion)return;
   main.inert=false;
   main.focus({preventScroll:true});
+  if(route==='configure'&&state.revealConfiguration){
+    state.revealConfiguration=false;
+    document.querySelector('#configuration-result')?.scrollIntoView({block:'start',behavior:'instant'});
+  }
 }
 window.addEventListener('hashchange',navigate);
 document.querySelector('#menu-toggle').innerHTML=icon('menu');
@@ -245,16 +273,20 @@ function connectionDialog() {
   openDialog('连接浇水设备',`<p class="dialog-description">请按外置按钮唤醒 ESP32-C3，并打开电脑或手机蓝牙；浏览器会让你选择设备</p>
   <div class="notice">默认值对应随项目提供的 ESP32-C3 BLE 验证固件；以下设置只在当前页面生效，量产固件可在部署环境中覆盖</div>
   ${['serviceUuid','writeUuid','notifyUuid'].map((key,i)=>`<label class="dialog-field">${['BLE 服务 UUID','写入特征 UUID','通知特征 UUID'][i]}<input name="${key}" value="${e(ble[key]||'')}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"></label>`).join('')}
+  <label class="dialog-field">设备密钥凭据（已供应密钥的设备需导入）<input type="file" name="credentialFile" accept=".json,application/json"></label>
+  ${ble.credential?`<p class="caption muted">本页已载入 ${e(ble.credential.deviceId)} 的凭据；刷新页面后清除。</p>`:''}
   <p class="caption muted">SWS-BLE 1.0 · JSON 分包传输；页面不支持远程唤醒设备</p>${device.state==='ready'?button('断开当前连接','disconnect',{type:'outline',extra:'type="button"'}):''}`,async form=>{
-    Object.assign(state.settings.ble,Object.fromEntries(new FormData(form)));
+    const data=new FormData(form),file=data.get('credentialFile');
+    if(file?.size){if(file.size>4096)throw new Error('设备凭据文件超过 4 KB');state.settings.ble.credential=validateCredential(JSON.parse(await file.text()));}
+    for(const key of ['serviceUuid','writeUuid','notifyUuid'])state.settings.ble[key]=data.get(key);
     dialog.close(); resetDeviceView(); await device.connect(state.settings.ble); toast('设备连接与握手成功');render();
   },'选择并连接设备');
 }
-function resetDeviceView(){state.historyOpen=false;state.historyPage=0;state.deviceError='';state.writeResult=null;pollFailures=0;}
+function resetDeviceView(){if(state.scene.deviceObservation){state.scene.deviceObservation=null;state.dirty=!!state.result;}state.historyOpen=false;state.historyPage=0;state.eventsOpen=false;state.eventsPage=0;state.eventsLoading=false;state.deviceError='';state.writeResult=device.pendingWrite?'unknown':null;pollFailures=0;}
 
 function readScene(form) {
   const data=Object.fromEntries(new FormData(form));
-    for(const key of ['potLiters','reservoirLiters','flowRateMlSec']){
+    for(const key of ['potLiters','reservoirLiters','flowRateMlSec','siteTemperatureC','siteHumidityPct']){
       const value=data[key] ?? state.scene[key];data[key]=value==null||value===''?null:Number(value);
     }
   return {...state.scene,...data};
@@ -304,9 +336,21 @@ main.addEventListener('submit',async event=>{
     if(state.generating||device.busy||!state.scene.locationToken||state.environmentLoading||!state.environment)return;
     state.scene=readScene(event.target);state.formError='';state.generating=true;state.writeResult=null;device.stage=null;
     const payload={...state.scene,currentRevision:device.status?.configRevision||0};
+    const nextConfig=device.state==='ready'&&device.handshake?.maxConfigVersion==='2.0'
+      &&['minimum-interval','target-bound-config'].every(value=>device.handshake.capabilities?.includes(value));
+    if(nextConfig){payload.configVersion='2.0';payload.targetDeviceId=device.status.deviceId;}
+    if([payload.siteTemperatureC,payload.siteHumidityPct,payload.siteObservedLocal].some(value=>value!==null&&value!=='')){
+      const measured=new Date(payload.siteObservedLocal);
+      if(payload.siteTemperatureC===null||payload.siteHumidityPct===null||!Number.isFinite(measured.getTime())){
+        state.formError='现场判断需要同时填写温度、空气湿度和测量时间';state.generating=false;render();return;
+      }
+      payload.onsiteObservation={temperatureC:payload.siteTemperatureC,humidityPct:payload.siteHumidityPct,observedAt:measured.toISOString()};
+    }
+    const generationTargetDeviceId=device.state==='ready'?device.status.deviceId:null;
     generationAbort=new AbortController();render();
     try {
-      state.result=await api('/api/configurations/generate',{method:'POST',body:payload,signal:generationAbort.signal});
+      const generated=await api('/api/configurations/generate',{method:'POST',body:payload,signal:generationAbort.signal});
+      state.result=generated;state.resultTargetDeviceId=generationTargetDeviceId;
       state.environment=state.result.environment;state.dirty=false;toast('配置已生成，请检查推荐说明后再发送');
     }catch(error){state.formError=error.message;toast(error.message,true);}
     finally{state.generating=false;render();document.querySelector(state.formError?'#form-error':'#configuration-result')?.scrollIntoView({block:'nearest',behavior:'smooth'});}
@@ -324,9 +368,10 @@ async function importFile(file) {
   try{
     if(file.size>64*1024)throw new Error('配置文件超过 64 KB');
     let config;try{config=JSON.parse(await file.text());}catch{throw new Error('无法解析 JSON 文件，请检查文件格式');}
-    state.result=await api('/api/configurations/import',{method:'POST',body:{config}});
-    state.dirty=false;state.writeResult=null;device.stage=null;toast('配置导入并校验成功');render();
-  }catch(error){toast(error.message,true);const node=document.querySelector('#config-file');if(node)node.value='';}
+    state.result=importedConfigResult(config);state.resultTargetDeviceId=null;
+    state.dirty=false;state.writeResult=null;device.stage=null;toast('配置已在浏览器校验并导入');render();
+  }catch(error){toast(error.message,true);}
+  finally{const node=document.querySelector('#config-file');if(node)node.value='';}
 }
 
 const actions={
@@ -336,6 +381,15 @@ const actions={
   demo:async()=>{if(!state.settings.demoEnabled)throw new Error('模拟设备未启用');resetDeviceView();await device.connect({},true);toast('模拟设备已连接，所有读数均为演示数据');render();},
   disconnect:()=>{device.disconnect();resetDeviceView();dialog.close();render();toast('设备已断开');},
   refresh:async()=>{await device.refresh();state.deviceError='';pollFailures=0;render();toast('已读取最新设备状态');},
+  'sync-time':async()=>{await device.syncTime();render();toast('设备已确认校时，最短间隔继续按经过时间计算');},
+  'quick-check':async()=>{
+    const sensorKey=document.querySelector('#stimulated-sensor')?.value||'';
+    await device.quickCheck(sensorKey);render();
+    toast(sensorKey?'三轮检查已开始，请立即改变所选传感器的实际输入':'设备已开始三轮传感器检查，请随后刷新查看结果');
+  },
+  'stop-watering':async()=>{await device.stop();render();toast('设备已确认停泵并回到展示模式');},
+  'use-device-observation':async()=>{await device.refresh();state.scene.deviceObservation=device.observationReport();state.dirty=!!state.result;render();toast('已选择设备准备期温湿度作为本次生成输入');},
+  'clear-device-observation':()=>{state.scene.deviceObservation=null;state.dirty=!!state.result;render();},
   environment:loadEnvironment,
   'choose-country':element=>selectCountry(element.dataset.code),
   'reload-locations':loadCountries,
@@ -343,15 +397,27 @@ const actions={
   export:async()=>{if(!state.result)throw new Error('请先生成或导入配置');await exportConfig(state.result.config);toast('配置文件已导出');},
   upload:()=>{
     if(state.dirty)throw new Error('场景已修改，请重新生成配置');
+    if(device.pendingWrite)throw new Error('上次写入结果待核对，请先连接原设备并读回配置');
+    if(state.resultTargetDeviceId && state.resultTargetDeviceId!==device.status?.deviceId)throw new Error('配置生成时连接的是另一台设备，请重新生成后发送');
     const config=structuredClone(state.result?.config);if(!config)throw new Error('请先生成配置');
+    if(config.configVersion==='2.0'&&config.targetDeviceId!==device.status?.deviceId)throw new Error('配置绑定的目标设备与当前连接不一致');
     confirmAction('发送配置到设备',`将 ${config.plant} 的 R${config.revision} 配置发送到 ${device.status?.deviceId}；设备会校验版本和参数，并在本地保存`,async()=>{
       state.writeResult=null;
       try{const result=await device.upload(config);state.writeResult='saved';toast(result.statusRefreshFailed?'配置已保存；状态刷新失败，请重新连接核对':'设备已确认配置写入成功');}
-      catch(error){state.writeResult='failed';throw error;}
+      catch(error){state.writeResult=device.stage;throw error;}
       finally{render();}
     });
   },
-  'device-download':async()=>{const config=await device.download();state.result=await api('/api/configurations/import',{method:'POST',body:{config}});state.dirty=false;state.writeResult=null;render();toast('已读取设备配置，可预览或导出');},
+  'verify-write':async()=>{
+    const result=await device.verifyPendingWrite();state.writeResult=device.stage;render();
+    toast(result==='saved'?'读回确认：设备已保存该配置':result==='not-saved'?'读回确认：设备未保存该版本，可重新发送':'设备配置已变化，请重新生成并核对后发送',result!=='saved');
+  },
+  'device-download':async()=>{
+    const config=await device.download();state.result=importedConfigResult(config);state.resultTargetDeviceId=device.status.deviceId;state.dirty=false;state.writeResult=null;
+    if(route==='configure'){render();document.querySelector('#configuration-result')?.scrollIntoView({block:'start',behavior:'instant'});}
+    else {state.revealConfiguration=true;location.hash='configure';}
+    toast(`设备配置 R${config.revision} 已读回，可核对参数或导出`);
+  },
   mode:()=>{
     const mode=document.querySelector('#target-mode').value;
     confirmAction('确认切换运行模式',`将切换到 ${mode}（${modes[mode]}）；${mode==='LONGRUN'?'请先完成实物标定，长期运行可能执行浇水并进入休眠':'设备将按目标模式工作'}；操作仍需固件二次确认`,async()=>{await device.operate('mode',mode);render();toast('设备已确认模式切换');});
@@ -365,6 +431,13 @@ const actions={
   },
   'history-prev':()=>{state.historyPage=Math.max(0,state.historyPage-1);render();},
   'history-next':()=>{state.historyPage=Math.min(Math.ceil(device.history.length/12)-1,state.historyPage+1);render();},
+  events:async()=>{
+    state.eventsLoading=true;render();
+    try{await device.readEvents();state.eventsOpen=true;state.eventsPage=0;toast(`已读取 ${device.events.length} 条设备事件`);}
+    finally{state.eventsLoading=false;render();}
+  },
+  'events-prev':()=>{state.eventsPage=Math.max(0,state.eventsPage-1);render();},
+  'events-next':()=>{state.eventsPage=Math.min(Math.ceil(device.events.length/8)-1,state.eventsPage+1);render();},
   retry:()=>initialize(),
 };
 
@@ -376,13 +449,21 @@ document.addEventListener('click',async event=>{
 });
 
 const polling=setInterval(async()=>{
-  if(route!=='device'||document.visibilityState!=='visible'||device.state!=='ready'||device.busy||dialog.open)return;
-  try{await device.refresh();pollFailures=0;state.deviceError='';}
-  catch(error){state.deviceError=error.message;pollFailures++;if(pollFailures>=3)device.disconnect('连续读取失败，请唤醒设备并重新连接');render();}
+  if(route!=='device'||document.visibilityState!=='visible'||device.state!=='ready'||device.busy||device.stopping||device.refreshing||dialog.open)return;
+  const generation=device.generation;
+  try{await device.refresh({background:true});if(generation===device.generation){pollFailures=0;const hadError=!!state.deviceError;state.deviceError='';if(hadError&&route==='device')render();}}
+  catch(error){if(generation!==device.generation||device.state!=='ready'||device.stopping)return;state.deviceError=error.message;pollFailures++;if(pollFailures>=3)device.disconnect('连续读取失败，请唤醒设备并重新连接');render();}
 },10000);
+const backendPolling=setInterval(async()=>{
+  if(document.visibilityState!=='visible'||!state.ready)return;
+  try{await api('/api/settings',{timeoutMs:5000});state.backendReachable=true;}
+  catch{state.backendReachable=false;}
+  state.backendCheckedAt=Date.now();if(route==='configure')updateConnectivity();
+},30000);
 window.addEventListener('resize',()=>{draw();if(window.innerWidth>=768)closeMenu();});
 window.addEventListener('pagehide',()=>{
-  generationAbort?.abort();environmentAbort?.abort();locationAbort?.abort();countryAbort?.abort();clearInterval(polling);device.disconnect();device.simulator=null;
+  device.credential=null;if(state.settings.ble)state.settings.ble.credential=null;
+  generationAbort?.abort();environmentAbort?.abort();locationAbort?.abort();countryAbort?.abort();clearInterval(polling);clearInterval(backendPolling);device.disconnect();device.simulator=null;
     state.scene={};state.result=null;state.environment=null;state.selectedLocation=null;state.locationCandidates=[];state.place={countries:[]};
   document.querySelectorAll('input,textarea').forEach(node=>{node.value='';});
 });
@@ -391,7 +472,10 @@ window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();
 async function initialize() {
   try{
     const [settings,plants]=await Promise.all(['/api/settings','/api/plants'].map(path=>api(path)));
-    Object.assign(state,{settings,plants,ready:true});navigate();
+    Object.assign(state,{settings,plants,ready:true,backendReachable:true,backendCheckedAt:Date.now()});navigate();
   }catch(error){main.innerHTML=`<section class="empty-state"><h1>工作区暂时无法加载</h1><p>${e(error.message)}</p>${button('重新加载','retry',{type:'primary'})}</section>`;}
 }
 initialize();
+if ('serviceWorker' in navigator && globalThis.isSecureContext) {
+  navigator.serviceWorker.register('/offline-sw.js', { scope: '/' }).catch(() => {});
+}

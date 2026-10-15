@@ -1,3 +1,5 @@
+import { configFileContents } from './config-file.js';
+
 export async function api(path, { method = 'GET', body, token, signal, timeoutMs=15000 } = {}) {
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -13,17 +15,17 @@ export async function api(path, { method = 'GET', body, token, signal, timeoutMs
   } catch (error) {
     if (error.name === 'AbortError') throw new Error('请求超时或已取消，请重试');
     if (error instanceof TypeError && /fetch/i.test(error.message)) {
-      throw new Error('无法连接本地服务请运行 prototype/start.bat 后刷新此页面，并通过 http://127.0.0.1:5000 打开网站');
+      throw new Error('无法连接本地服务。请运行 prototype/start.bat，并通过 http://127.0.0.1:5000 打开网站');
     }
     throw error;
   }
   finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
 }
 
-export async function exportConfig(config) {
-  const result = await api('/api/configurations/export', { method: 'POST', body: { config } });
-  const blob = new Blob([JSON.stringify(result, null, 2) + '\n'], { type: 'application/json' });
+export function exportConfig(config) {
+  const { contents, revision } = configFileContents(config);
+  const blob = new Blob([contents], { type: 'application/json' });
   const url = URL.createObjectURL(blob), anchor = document.createElement('a');
-  anchor.href = url; anchor.download = `watering-config-r${config.revision}.json`; anchor.click();
+  anchor.href = url; anchor.download = `watering-config-r${revision}.json`; anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

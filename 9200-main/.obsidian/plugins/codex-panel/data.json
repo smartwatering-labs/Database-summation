@@ -1,0 +1,15 @@
+{
+  "codexPath": "codex",
+  "threadNamingModel": null,
+  "threadNamingEffort": null,
+  "rewriteSelectionModel": null,
+  "rewriteSelectionEffort": null,
+  "showToolbar": true,
+  "sendShortcut": "enter",
+  "scrollThreadFromComposerEdges": false,
+  "attachmentFolder": "Codex Attachments",
+  "archiveExportEnabled": false,
+  "archiveExportFolderTemplate": "Codex Archives",
+  "archiveExportFilenameTemplate": "{{date}} {{time}} {{title}} {{shortId}}.md",
+  "archiveExportTags": ""
+}

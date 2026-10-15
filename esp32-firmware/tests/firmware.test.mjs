@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { FrameDecoder, encodeMessage, authentication, validateHandshake, validateStatus } from '../../prototype/static/js/services/protocol.js';
+import { FrameDecoder, encodeMessage, authentication, validateHandshake, validateStatus, handshakeAuthentication, secureMessage, readSecureMessage } from '../../prototype/static/js/services/protocol.js';
 import { BleTransport } from '../../prototype/static/js/services/ble.js';
 import { DeviceController } from '../../prototype/static/js/services/device.js';
 
@@ -77,6 +77,17 @@ test('C++ rejects invalid configurations and storage failures without a saved ac
   await assert.rejects(d.request('confirmOperation',prepared),/NVS/);assert.equal((await d.request('status')).configRevision,1);
 });
 
+test('C++ binds 2.0 configurations to the device and checks the control interval',async t=>{
+  const d=device(t),handshake=await d.authenticate();
+  assert.equal(handshake.maxConfigVersion,'2.0');
+  const config={...configuration(),configVersion:'2.0',targetDeviceId:handshake.deviceId,
+    params:{...configuration().params,minWaterIntervalSeconds:172800}};
+  await assert.rejects(d.request('setConfiguration',{config:{...config,targetDeviceId:'C3-other'}}),/目标设备不匹配/);
+  await assert.rejects(d.request('setConfiguration',{config:{...config,params:{...config.params,minWaterIntervalSeconds:3599}}}),/最短浇水间隔/);
+  assert.deepEqual(await d.request('setConfiguration',{config}),{saved:true,revision:1});
+  await d.authenticate();assert.deepEqual((await d.request('getConfiguration')).config,config);
+});
+
 test('C++ rejects corrupt frames and recovers after a partial-message timeout',async t=>{
   const d=device(t);await d.authenticate();
   await assert.rejects(d.request('status',{},frames=>frames.map(frame=>{
@@ -98,4 +109,56 @@ test('browser controller and GATT framing operate directly against the compiled 
   const result=await controller.upload(configuration());assert.equal(result.saved,true);assert.equal(controller.status.configRevision,1);
   assert.deepEqual(await controller.download(),configuration());await controller.operate('mode','PREPARE');
   assert.equal(controller.status.mode,'PREPARE');assert.deepEqual(await controller.readHistory(),[]);
+});
+
+test('per-device mutual authentication signs messages and rejects replay and tampering',async t=>{
+  const d=device(t),secret='1f'.repeat(32);await d.control({secret});
+  const handshake=await d.request('handshake');assert.equal(handshake.authProfile,'hmac-sha256-v1');
+  await assert.rejects(handshakeAuthentication({...handshake,deviceProof:'0'.repeat(64)},{deviceId:'NATIVE-C3',secret}),/身份/);
+  const auth=await handshakeAuthentication(handshake,{deviceId:'NATIVE-C3',secret});
+  await d.request('authenticate',{auth:auth.auth});
+  await assert.rejects(d.request('status'),/封装/);
+  const inner={id:'native-4',protocol:'SWS-BLE',protocolVersion:'1.0',action:'status',payload:{}};
+  // The raw helper sequence includes handshake, authentication and rejected status.
+  const envelope=await secureMessage(inner,auth.security,'request',1);
+  d.send('secured',envelope);const reply=await d.next();assert.equal(reply.status,'secured');
+  assert.equal((await readSecureMessage(reply.payload,auth.security,'response',1)).payload.deviceId,'NATIVE-C3');
+  await assert.rejects(d.request('secured',envelope),/序号/);
+  const nextInner={...inner,id:'native-6'},next=await secureMessage(nextInner,auth.security,'request',2);
+  await assert.rejects(d.request('secured',{...next,mac:'0'.repeat(64)}),/完整性/);
+});
+
+test('browser controller provisions an authenticated transport against the firmware core',async t=>{
+  const d=device(t),secret='2f'.repeat(32);await d.control({secret});
+  const transport=new BleTransport({},()=>{},()=>{});transport.closed=false;
+  const lines=createInterface({input:d.process.stdout});lines.on('line',line=>{if(!line.startsWith('@'))transport.decoder.push(new TextEncoder().encode(line+'\n'));});
+  t.after(()=>{lines.close();transport.disconnect();});transport.writer={writeValueWithResponse:async bytes=>{d.process.stdin.write(bytes);}};
+  const controller=new DeviceController();controller.transport=transport;controller.state='ready';controller.credential={deviceId:'NATIVE-C3',secret};
+  await controller.authenticate();controller.status=await transport.request('status');
+  assert.equal(transport.limits.maxConfigBytes,4000);assert.equal((await controller.upload(configuration())).saved,true);
+  assert.deepEqual(await controller.download(),configuration());
+});
+
+test('viewer and operator credentials are enforced by the C++ endpoint',async t=>{
+  const d=device(t),secret='3f'.repeat(32),viewerSecret='4f'.repeat(32),operatorSecret='5f'.repeat(32);
+  await d.control({secret,viewerSecret,operatorSecret});
+  const transport=new BleTransport({},()=>{},()=>{});transport.closed=false;
+  const lines=createInterface({input:d.process.stdout});
+  lines.on('line',line=>{if(!line.startsWith('@'))transport.decoder.push(new TextEncoder().encode(line+'\n'));});
+  t.after(()=>{lines.close();transport.disconnect();});
+  transport.writer={writeValueWithResponse:async bytes=>{d.process.stdin.write(bytes);}};
+  const controller=new DeviceController();controller.transport=transport;controller.state='ready';
+  controller.credential={deviceId:'NATIVE-C3',role:'viewer',secret:viewerSecret};
+  await controller.authenticate();
+  assert.equal(controller.handshake.authorizationRole,'viewer');
+  assert.equal((await transport.request('status')).authorizationRole,'viewer');
+  await assert.rejects(transport.request('setConfiguration',{config:configuration()}),/仅允许读取/);
+  assert.equal((await transport.request('stop')).stopped,true);
+  controller.credential={deviceId:'NATIVE-C3',role:'operator',secret:operatorSecret};
+  await controller.authenticate();
+  assert.equal((await transport.request('status')).authorizationRole,'operator');
+  await assert.rejects(transport.request('setConfiguration',{config:configuration()}),/无权修改/);
+  await assert.rejects(transport.request('prepareOperation',{operation:'factoryReset'}),/无权修改/);
+  const prepared=await transport.request('prepareOperation',{operation:'mode',mode:'PREPARE'});
+  assert.equal((await transport.request('confirmOperation',prepared)).confirmed,true);
 });

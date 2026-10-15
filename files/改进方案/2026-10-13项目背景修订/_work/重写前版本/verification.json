@@ -1,0 +1,34 @@
+[
+  {
+    "document": "硬件1",
+    "pages": 5,
+    "originalUnchanged": true,
+    "paragraphsPresentInRender": true,
+    "visualReview": "All pages inspected; no clipping, overlap, isolated table rows or blank pages",
+    "sha256": "bd26d5533d42f6869a66b1b05e0817e036f592bef9c79c8a0e542684e91437e4"
+  },
+  {
+    "document": "硬件2",
+    "pages": 4,
+    "originalUnchanged": true,
+    "paragraphsPresentInRender": true,
+    "visualReview": "All pages inspected; no clipping, overlap, isolated table rows or blank pages",
+    "sha256": "f4221f6e79d71ee11e6a22b33e55fc9d8330fe1ed858165e24150a27feac4bef"
+  },
+  {
+    "document": "网页1",
+    "pages": 5,
+    "originalUnchanged": true,
+    "paragraphsPresentInRender": true,
+    "visualReview": "All pages inspected; no clipping, overlap, isolated table rows or blank pages",
+    "sha256": "688f4613687ec530d96a33842b8730a7bb370a5e24df3fda57cb535ce5bd751e"
+  },
+  {
+    "document": "网页2",
+    "pages": 5,
+    "originalUnchanged": true,
+    "paragraphsPresentInRender": true,
+    "visualReview": "All pages inspected; no clipping, overlap, isolated table rows or blank pages",
+    "sha256": "87cb1cc83b13dd21c0e98fdf74ceb53b45ce4b57001982992cff85f7a1d036ec"
+  }
+]
