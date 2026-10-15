@@ -1,0 +1,46 @@
+{
+  "skills": {
+    "no-negative-echo": "https://github.com/LB623/no-negative-echo",
+    "anti-defensive-writing": "https://github.com/Kiterlin/anti-defensive-writing"
+  },
+  "backup": "C:\\Users\\bYYYyyL\\Desktop\\Watering-platform\\files\\改进方案\\2026-10-13项目背景修订\\_work\\重写前版本",
+  "sources": {
+    "硬件1": "dc99c0aaaaf8638a399613761ab8039811852ac45f392bbf469df788aedd0b37",
+    "硬件2": "378fc61676f053cf72fac39bc085ab36928a3b8c6f98c29a5421a2464b522f6f",
+    "网页1": "172f7ddcabacc99fa97e364ed2cca0b27990489c3ed4e1ce1511f59093762c7e",
+    "网页2": "54eb341e3eaa46751e1bebb9e5654141057b69ba0c4c2bd5d433679680ba1414"
+  },
+  "installedSkillSha256": {
+    "no-negative-echo": "7285b7e2a1d22284c92a4cb68703b427da59952682268178f53bc74093381a25",
+    "anti-defensive-writing": "ef055917cc1407064cd0deaffd78264c251e8a27c30c112c54c64fb5ca46ef7a"
+  },
+  "renderedPagesReviewed": 17,
+  "coverage": {
+    "HW1": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05",
+      "06"
+    ],
+    "HW2": [
+      "01",
+      "02",
+      "03"
+    ],
+    "WEB1": [
+      "01",
+      "02",
+      "03",
+      "04"
+    ],
+    "WEB2": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+# Local secrets and per-machine configuration
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+
+# Python
+**/__pycache__/
+*.py[cod]
+**/.venv/
+**/venv/
+
+# JavaScript and generated test output
+**/node_modules/
+**/test-results/
+
+# Firmware toolchains and build products
+**/.pio/
+**/.tools/
+**/build/
+
+# Runtime databases, logs, and caches
+**/instance/
+*.sqlite
+*.sqlite3
+*.db
+*.log
+**/.cache/

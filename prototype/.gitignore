@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+instance/
+.env
+test-results/
+node_modules/
+.tools/
+**/.pio/

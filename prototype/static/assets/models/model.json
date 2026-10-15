@@ -1,0 +1,283 @@
+{
+  "url": "/static/assets/models/watering-box-9-30ver.glb",
+  "format": "glb",
+  "upAxis": "z",
+  "label": "浇水设备完整模型",
+  "parts": [
+    {
+      "name": "外壳-顶盖",
+      "kind": "shell",
+      "states": {
+        "home": {
+          "offset": [
+            0,
+            0,
+            -4.857305
+          ],
+          "opacity": 1
+        },
+        "product": {
+          "offset": [
+            0,
+            0,
+            4.35
+          ],
+          "opacity": 1
+        },
+        "configure": {
+          "offset": [
+            0,
+            0,
+            4.5
+          ],
+          "opacity": 0
+        },
+        "device": {
+          "offset": [
+            0,
+            0,
+            4.5
+          ],
+          "opacity": 0
+        }
+      }
+    },
+    {
+      "name": "外壳-底壳",
+      "kind": "shell",
+      "states": {
+        "home": {
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "opacity": 1
+        },
+        "product": {
+          "offset": [
+            0,
+            0,
+            -7.18
+          ],
+          "opacity": 1
+        },
+        "configure": {
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "opacity": 1
+        },
+        "device": {
+          "offset": [
+            0,
+            0,
+            -2.1
+          ],
+          "opacity": 0
+        }
+      }
+    },
+    {
+      "name": "上层主板",
+      "states": {
+        "home": {
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "opacity": 1
+        },
+        "product": {
+          "offset": [
+            0,
+            0,
+            3.1
+          ],
+          "opacity": 1
+        },
+        "configure": {
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "opacity": 1
+        },
+        "device": {
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "opacity": 1
+        }
+      }
+    },
+    {
+      "name": "下层主板",
+      "states": {
+        "home": {
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "opacity": 1
+        },
+        "product": {
+          "offset": [
+            0,
+            0,
+            0.3
+          ],
+          "opacity": 1
+        },
+        "configure": {
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "opacity": 1
+        },
+        "device": {
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "opacity": 1
+        }
+      }
+    }
+  ],
+  "poses": {
+    "home": {
+      "rotationOrder": "XYZ",
+      "rotation": [
+        0.28,
+        -0.44,
+        0
+      ],
+      "open": 0,
+      "frame": {
+        "desktop": {
+          "center": [
+            0.54,
+            0.48
+          ],
+          "fill": [
+            0.64,
+            0.5
+          ]
+        },
+        "mobile": {
+          "center": [
+            0.5,
+            0.48
+          ],
+          "fill": [
+            0.86,
+            0.36
+          ]
+        }
+      }
+    },
+    "product": {
+      "rotationOrder": "XYZ",
+      "rotation": [
+        0.3,
+        -0.38,
+        0
+      ],
+      "open": 1,
+      "frame": {
+        "desktop": {
+          "center": [
+            0.61,
+            0.5
+          ],
+          "fill": [
+            0.6,
+            0.91
+          ]
+        },
+        "mobile": {
+          "center": [
+            0.5,
+            0.36
+          ],
+          "fill": [
+            0.86,
+            0.88
+          ]
+        }
+      }
+    },
+    "configure": {
+      "rotation": [
+        1.5707963267948966,
+        0,
+        0
+      ],
+      "open": 1,
+      "frame": {
+        "desktop": {
+          "center": [
+            0.5,
+            0.48
+          ],
+          "fill": [
+            0.63,
+            0.65
+          ]
+        },
+        "mobile": {
+          "center": [
+            0.5,
+            0.46
+          ],
+          "fill": [
+            0.84,
+            0.6
+          ]
+        }
+      }
+    },
+    "device": {
+      "rotationOrder": "XYZ",
+      "rotation": [
+        0.38,
+        -0.44,
+        0
+      ],
+      "open": 0,
+      "frame": {
+        "desktop": {
+          "center": [
+            0.5,
+            0.46
+          ],
+          "fill": [
+            0.7,
+            0.6
+          ]
+        },
+        "mobile": {
+          "center": [
+            0.5,
+            0.46
+          ],
+          "fill": [
+            0.86,
+            0.57
+          ]
+        }
+      }
+    }
+  }
+}

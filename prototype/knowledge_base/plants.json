@@ -1,0 +1,14 @@
+{
+  "version": "2026.09-seed.1",
+  "provenance": "工程初始建议库，尚未经农艺和实物标定；用于生成可解释的初始配置",
+  "items": [
+    {"id":"tomato","name":"番茄","category":"蔬菜","dailyMl":450,"threshold":50,"soilWeight":0.65,"tempWeight":0.25,"airWeight":0.10,"tags":["喜光","需水较多"]},
+    {"id":"pepper","name":"辣椒","category":"蔬菜","dailyMl":350,"threshold":53,"soilWeight":0.65,"tempWeight":0.25,"airWeight":0.10,"tags":["喜光","避免积水"]},
+    {"id":"lettuce","name":"生菜","category":"蔬菜","dailyMl":250,"threshold":45,"soilWeight":0.70,"tempWeight":0.20,"airWeight":0.10,"tags":["浅根","保持湿润"]},
+    {"id":"basil","name":"罗勒","category":"香草","dailyMl":220,"threshold":48,"soilWeight":0.65,"tempWeight":0.20,"airWeight":0.15,"tags":["喜光","适度湿润"]},
+    {"id":"mint","name":"薄荷","category":"香草","dailyMl":250,"threshold":45,"soilWeight":0.70,"tempWeight":0.15,"airWeight":0.15,"tags":["喜湿","生长较快"]},
+    {"id":"pothos","name":"绿萝","category":"观叶","dailyMl":140,"threshold":60,"soilWeight":0.75,"tempWeight":0.15,"airWeight":0.10,"tags":["散射光","避免积水"]},
+    {"id":"rose","name":"月季","category":"花卉","dailyMl":350,"threshold":52,"soilWeight":0.65,"tempWeight":0.25,"airWeight":0.10,"tags":["喜光","保持通风"]},
+    {"id":"succulent","name":"多肉植物","category":"多肉","dailyMl":60,"threshold":75,"soilWeight":0.80,"tempWeight":0.15,"airWeight":0.05,"tags":["耐旱","控水"]}
+  ]
+}

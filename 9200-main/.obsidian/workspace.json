@@ -1,0 +1,254 @@
+{
+  "main": {
+    "id": "e024104aa669269a",
+    "type": "split",
+    "children": [
+      {
+        "id": "bd51e169115e8e0d",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "17ccbe7aa874ce8c",
+            "type": "leaf",
+            "state": {
+              "type": "empty",
+              "state": {},
+              "icon": "lucide-file",
+              "title": "新标签页"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "3f80d0973a58fc2d",
+    "type": "split",
+    "children": [
+      {
+        "id": "b487750c11a47d4d",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "c5510e45fa97d134",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "文件列表"
+            }
+          },
+          {
+            "id": "ca147d0997ddc1da",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "tag:#WTD",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "搜索"
+            }
+          },
+          {
+            "id": "b1ec97c82c0dd655",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "书签"
+            }
+          },
+          {
+            "id": "a0fbc6be8791b717",
+            "type": "leaf",
+            "state": {
+              "type": "notebook-navigator",
+              "state": {},
+              "icon": "notebook-navigator",
+              "title": "笔记本导航器"
+            }
+          }
+        ],
+        "currentTab": 3
+      }
+    ],
+    "direction": "horizontal",
+    "width": 639.5
+  },
+  "right": {
+    "id": "ed04de7eb45fa1a6",
+    "type": "split",
+    "children": [
+      {
+        "id": "b618ed49048e241a",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "41b2c65632a0f9b1",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "反向链接"
+            }
+          },
+          {
+            "id": "32be7470ddb9db9f",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "出链"
+            }
+          },
+          {
+            "id": "b1d50ab5ec1b8578",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "标签"
+            }
+          },
+          {
+            "id": "bddd4944d5b49012",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "添加笔记属性"
+            }
+          },
+          {
+            "id": "a2d1f5326fd139f9",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "大纲"
+            }
+          },
+          {
+            "id": "a5060bc501786f6d",
+            "type": "leaf",
+            "state": {
+              "type": "codex-panel-view",
+              "state": {
+                "version": 1
+              },
+              "icon": "bot-message-square",
+              "title": "Codex"
+            }
+          }
+        ],
+        "currentTab": 5
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:打开快速切换": false,
+      "graph:查看关系图谱": false,
+      "canvas:新建白板": false,
+      "daily-notes:打开/创建今天的日记": false,
+      "templates:插入模板": false,
+      "command-palette:打开命令面板": false,
+      "bases:新建数据库": false,
+      "notebook-navigator:笔记本导航器": false,
+      "codex-panel:Open panel": false
+    }
+  },
+  "active": "a0fbc6be8791b717",
+  "lastOpenFiles": [
+    "浇水项目/100-现今背景资料/130-浇水机器网页/131-具体要求.md",
+    "2026-09-28.md",
+    "浇水项目/300-历史改进/2026-09-09/网页首版实现记录.md",
+    "浇水项目/100-现今背景资料/140-协同架构/141-各部协同方式.md",
+    "浇水项目/100-现今背景资料/140-协同架构/142-流程图.md",
+    "浇水项目/000-基础认识/001-背景概述.md",
+    "浇水项目/000-基础认识/002-术语使用规范.md",
+    "浇水项目/300-历史改进/2026-09-09/后端方案修订.md",
+    "浇水项目/100-现今背景资料/130-浇水机器网页/135-网页结构.md",
+    "浇水项目/300-历史改进/2026-09-09",
+    "浇水项目/100-现今背景资料/130-浇水机器网页/134-前后端分化.md",
+    "浇水项目/100-现今背景资料/130-浇水机器网页/133-API服务.md",
+    "浇水项目/100-现今背景资料/110-浇水机器程序/114-调用库.md",
+    "浇水项目/100-现今背景资料/110-浇水机器程序/112-编程要点.md",
+    "浇水项目/100-现今背景资料/110-浇水机器程序/111-功能需求.md",
+    "浇水项目/100-现今背景资料/130-浇水机器网页/132-协议使用.md",
+    "浇水项目/300-历史改进/2026-09-08/芯片程序改动.md",
+    "浇水项目/300-历史改进/2026-09-08/网页改动.md",
+    "浇水项目/300-历史改进/2026-09-08",
+    "浇水项目/100-现今背景资料/130-浇水机器网页/136-限制与边界.md",
+    "浇水项目/100-现今背景资料/120-浇水机器硬件/123-电子元件使用情况及其特性/123.1单片机/123.1 ESP32C3 chip.md",
+    "浇水项目/100-现今背景资料/120-浇水机器硬件/121- 电路板情况/121.3电路板基础说明.md",
+    "浇水项目/100-现今背景资料/120-浇水机器硬件/硬件情况概述.md",
+    "浇水项目/300-历史改进/2026-06-15/硬件改动.md",
+    "浇水项目/300-历史改进/2026-06-15/背景改动.md",
+    "浇水项目/300-历史改进/2026-06-15/网页改动.md",
+    "浇水项目/200-历史版本/v0.0.0/当时背景.md",
+    "浇水项目/100-现今背景资料/120-浇水机器硬件/121- 电路板情况/121.1-原理图/原理图图片说明：.md",
+    "浇水项目/100-现今背景资料/120-浇水机器硬件/121- 电路板情况/121.1-原理图/图片/ALL.png",
+    "浇水项目/100-现今背景资料/120-浇水机器硬件/121- 电路板情况/121.1-原理图/图片/3.png",
+    "浇水项目/100-现今背景资料/120-浇水机器硬件/121- 电路板情况/121.1-原理图/图片/2.png",
+    "浇水项目/100-现今背景资料/120-浇水机器硬件/121- 电路板情况/121.1-原理图/图片/1.png",
+    "Pasted image 20260627024734.png",
+    "Pasted image 20260627024441.png",
+    "AI技能/01-obsidian本身技能/obsidian-skills/skills/obsidian-markdown/references",
+    "AI技能/01-obsidian本身技能/obsidian-skills/skills/json-canvas/references",
+    "AI技能/01-obsidian本身技能/obsidian-skills/skills/obsidian-bases/references",
+    "AI技能/01-obsidian本身技能/obsidian-skills/skills/obsidian-markdown",
+    "AI技能/01-obsidian本身技能/obsidian-skills/skills/obsidian-cli",
+    "AI技能/01-obsidian本身技能/obsidian-skills/skills/obsidian-bases",
+    "AI技能/01-obsidian本身技能/obsidian-skills/skills/json-canvas",
+    "AI技能/01-obsidian本身技能/obsidian-skills/skills/defuddle",
+    "浇水项目/100-现今背景资料/120-浇水机器硬件/121- 电路板情况/121.1-原理图/图片/5.png",
+    "浇水项目/100-现今背景资料/120-浇水机器硬件/121- 电路板情况/121.1-原理图/图片/4.png",
+    "浇水项目/100-现今背景资料/120-浇水机器硬件/123-电子元件使用情况及其特性/123.1单片机/ESP 32 C3.png",
+    "浇水项目/100-现今背景资料/120-浇水机器硬件/121- 电路板情况/121.2-PCB/上色图：/ONLYB.png"
+  ]
+}

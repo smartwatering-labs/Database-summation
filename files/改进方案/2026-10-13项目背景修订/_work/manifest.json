@@ -1,0 +1,34 @@
+[
+  {
+    "name": "硬件1",
+    "output": "C:\\Users\\bYYYyyL\\Desktop\\Watering-platform\\files\\改进方案\\2026-10-13项目背景修订\\硬件1 项目背景修订版.docx",
+    "sha256": "09bf90867004ed76b78cbcbc2d70b88e6c5fbb89082ce8510093a22db64dbbf5",
+    "plannedPages": 5,
+    "characters": 3640,
+    "originalSha256": "5189beea17f840283e6d69ba4a6751c6ee033ab64e788621d3a13b001d7b68dd"
+  },
+  {
+    "name": "硬件2",
+    "output": "C:\\Users\\bYYYyyL\\Desktop\\Watering-platform\\files\\改进方案\\2026-10-13项目背景修订\\硬件2 项目背景修订版.docx",
+    "sha256": "3273ac1da787cfd4e8fadb1827ba8b5750c8b630242d5c784374e9b022123d17",
+    "plannedPages": 4,
+    "characters": 2676,
+    "originalSha256": "45884c13c75b499cf44ae118cb2fd78d4b17fa7deece7a4689204300a42d675c"
+  },
+  {
+    "name": "网页1",
+    "output": "C:\\Users\\bYYYyyL\\Desktop\\Watering-platform\\files\\改进方案\\2026-10-13项目背景修订\\网页1 项目背景修订版.docx",
+    "sha256": "674aeb76061677489dbb2c8a4945bbe7d973723b45177b981bcbbde9ae40b5db",
+    "plannedPages": 4,
+    "characters": 2910,
+    "originalSha256": "ff56791c1bc24f7dae4b7375b9e354d2a432cc96bcc26360ac75a2a3f1bd6685"
+  },
+  {
+    "name": "网页2",
+    "output": "C:\\Users\\bYYYyyL\\Desktop\\Watering-platform\\files\\改进方案\\2026-10-13项目背景修订\\网页2 项目背景修订版.docx",
+    "sha256": "3918e8623cef2e5c0bde1e88c7e1bac590069d6ffbbd59d184c37c65e9d81b8b",
+    "plannedPages": 4,
+    "characters": 3211,
+    "originalSha256": "772c685f77f5173019cb16fe8bbf86d11e673377b8522e80d1927eb061abc807"
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "version":"2026.09-seed.1",
+  "provenance":"工程启发式修正系数，需根据实物校准",
+  "cultivation":{"pot":1.0,"ground":1.25},
+  "light":{"shade":0.75,"partial":1.0,"full":1.25},
+  "season":{"spring":4,"summer":2,"autumn":4,"winter":6},
+  "flowRateMlSec":22
+}
