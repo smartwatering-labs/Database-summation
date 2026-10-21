@@ -21,6 +21,8 @@ py -3 app.py
 
 部署应用目录为 `prototype`，必须包含 `app.py`、`requirements.txt`、`engine/`、`knowledge_base/`、`templates/`、`static/`。Docker 方式另需 `Dockerfile`、`.dockerignore` 和 `compose.yaml`。
 
+`static/` 内模型和部分 Three.js 文件包含相邻的 `.gz` 无损预压缩副本，上传时一并保留。Flask 按 `Accept-Encoding` 协商发送，并以 ETag 重验证；API 与页面继续使用 `no-store`。修改模型或对应 vendor 文件后，在开发电脑执行 `node tools/compress-model-assets.cjs` 重新生成副本（服务器无需 Node）。缺少副本或原文件更新较晚时自动发送原文件。若以后让反向代理直接接管静态资源，需要在那里配置等价的预压缩协商、正确的 Content-Encoding 和 Vary 响应头。
+
 不上传本地 Python 安装目录、旧虚拟环境、`node_modules/`、测试截图或开发数据库。`instance/system.sqlite3` 会自动创建；部署用户需要对 `instance/` 有写权限。需要保留系统维护日志时，为该目录配置持久化存储。后端不存储用户配置和设备历史。
 
 ## Docker 部署

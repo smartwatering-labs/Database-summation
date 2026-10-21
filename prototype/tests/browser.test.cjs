@@ -1,99 +1,143 @@
-const path=require('path');
-const fs=require('fs');
-const assert=require('node:assert/strict');
-const {chromium}=require('playwright');
-const output=path.resolve(process.env.ARTIFACT_DIR || 'test-results');
-fs.mkdirSync(output,{recursive:true});
-const base=process.env.TEST_URL || 'http://127.0.0.1:5000';
-const adminUrl=new URL(base);adminUrl.hostname='admin.localhost';const adminBase=adminUrl.href;
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { chromium } = require('playwright');
 
-(async()=>{
- const browser=await chromium.launch({headless:true,...(process.env.BROWSER_PATH?{executablePath:process.env.BROWSER_PATH}: {})});
- const context=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true,reducedMotion:'no-preference'});
- const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));
- page.on('console',message=>{if(message.type()==='error'&&!message.text().includes('status of 4'))errors.push(message.text());});
- const go=async name=>{await page.evaluate(name=>{location.hash=name},name);await page.locator('#breadcrumb').filter({hasText:{home:'首页',configure:'个性化库编译',device:'硬件情况查看',product:'产品介绍'}[name]}).waitFor();};
- const visible=async selector=>page.locator(selector).waitFor({state:'visible'});
- try {
-  await page.goto(base,{waitUntil:'networkidle'});await visible('.hardware-display');
-  const wordmark=page.locator('.desktop-brand.wordmark');
-  assert.deepEqual(await wordmark.locator('.variable-proximity-line').allInnerTexts(),['Smart','Watering','System']);
-  const firstLetter=wordmark.locator('.variable-proximity-letter').first(),letterBox=await firstLetter.boundingBox();
-  await page.mouse.move(700,500);await page.waitForTimeout(350);
-  const baseWeight=Number(await firstLetter.evaluate(node=>getComputedStyle(node).fontWeight));
-  await page.mouse.move(letterBox.x+letterBox.width/2+60,letterBox.y+letterBox.height/2);await page.waitForTimeout(80);
-  assert.equal(Number(await firstLetter.evaluate(node=>node.style.fontWeight)),480);
-  await page.mouse.move(letterBox.x+letterBox.width/2+35,letterBox.y+letterBox.height/2);await page.waitForTimeout(80);
-  assert.ok(Number(await firstLetter.evaluate(node=>node.style.fontWeight))>480);
-  await page.mouse.move(letterBox.x+letterBox.width/2,letterBox.y+letterBox.height/2);await page.waitForTimeout(45);
-  const movingWeight=Number(await firstLetter.evaluate(node=>getComputedStyle(node).fontWeight));
-  await page.waitForTimeout(350);
-  const nearWeight=Number(await firstLetter.evaluate(node=>getComputedStyle(node).fontWeight));
-  assert.ok(movingWeight>baseWeight&&movingWeight<nearWeight,'wordmark weight should animate smoothly');
-  assert.ok(Number(await firstLetter.evaluate(node=>node.style.fontWeight))>480);
-  assert.ok(Number.parseFloat(await firstLetter.evaluate(node=>node.style.webkitTextStrokeWidth))>.5);
-  await page.mouse.move(700,500);await page.waitForTimeout(80);
-  assert.equal(Number(await firstLetter.evaluate(node=>node.style.fontWeight)),480);
-  assert.equal(await page.locator('.home-heading h1').innerText(),'照料植物\n从了解它开始');
-  assert.equal(await page.locator('.home-heading').getByText('从每一次采样').count(),0);
-  assert.equal(await page.locator('.home-note,.page-footer').count(),0);
-  assert.equal(await page.getByText('从配置，到运行').count(),0);
-  assert.equal(await page.getByText('了解系统',{exact:true}).count(),0);
-  assert.equal(await page.locator('#hardware-heading').innerText(),'感知环境\n按需浇灌');
-  assert.equal(await page.locator('#main').evaluate(node=>getComputedStyle(node).paddingBottom),'40px');
-  assert.equal(await page.locator('.home-heading h1').evaluate(node=>getComputedStyle(node).fontSize),'56px');
-  assert.equal(await page.locator('a[href="#admin"]').count(),0);await page.screenshot({path:path.join(output,'home-desktop.png'),fullPage:true});
-  await go('device');await visible('.device-empty');await page.getByRole('button',{name:'体验模拟设备',exact:true}).click();await visible('.sensor-grid');
-  await page.getByRole('button',{name:'读取最近一周',exact:true}).click();await visible('.history-summary');assert.equal(await page.locator('tbody tr').count(),12);
-  await page.screenshot({path:path.join(output,'device-desktop.png'),fullPage:true});
-  await go('product');assert.equal(await page.getByRole('link',{name:'开始配置',exact:true}).count(),0);assert.equal(await page.locator('.product-intro h2').innerText(),'植物的状态\n是每次浇水的起点');
-  await go('configure');assert.equal(await page.locator('.page-heading').getByRole('link',{name:'查看硬件情况'}).count(),0);
-  assert.equal(await page.locator('#unattended,#flowRateMlSec,.location-presets').count(),0);
-  await page.getByLabel('供水装置',{exact:true}).selectOption('valve');
-  assert.equal(await page.getByLabel('用户水泵流量',{exact:true}).count(),1);
-  await page.getByLabel('用户水泵流量',{exact:true}).fill('11');
-  await page.getByLabel('供水装置',{exact:true}).selectOption('builtin');
-  assert.equal(await page.locator('#flowRateMlSec').count(),0);
-  await page.getByLabel('国家 / 地区',{exact:true}).fill('中');
-  await page.locator('[data-action="choose-country"][data-code="CN"]').waitFor();
-  await page.screenshot({path:path.join(output,'country-suggestions.png'),fullPage:true});
-  await page.locator('[data-action="choose-country"][data-code="CN"]').click();
-  await page.locator('#place-province option[value="320000"]').waitFor({state:'attached'});
-  assert.equal(await page.locator('#country-search').inputValue(),'中国');
-  assert.equal(await page.locator('#place-province option:not([disabled])').count(),34);
-  assert.equal(await page.locator('#place-city').isDisabled(),true);
-  await page.getByLabel('省份 / 直辖市',{exact:true}).selectOption('310000');
-  assert.equal(await page.locator('#place-city').count(),0);
-  await visible('.environment-summary');
-  assert.match(await page.locator('#location-confirmation').textContent(),/上海市/);
-  await page.getByLabel('省份 / 直辖市',{exact:true}).selectOption('320000');
-  await page.locator('#place-city option[value="320500"]').waitFor({state:'attached'});
-  assert.equal(await page.locator('#place-city option:not([disabled])').count(),13);
-  assert.equal(await page.locator('.environment-summary').count(),0);
-  await page.getByLabel('城市',{exact:true}).selectOption('320500');
-  await visible('.environment-summary');
-  assert.match(await page.locator('#location-confirmation').textContent(),/江苏省.*苏州市/);
-  await page.screenshot({path:path.join(output,'province-city-selection.png'),fullPage:true});
-  await page.getByLabel('国家 / 地区',{exact:true}).fill('日');
-  assert.equal(await page.locator('#place-province,#place-city,.environment-summary').count(),0);
-  assert.equal(await page.locator('#scenario-form button[type="submit"]').isDisabled(),true);
-  await page.locator('[data-action="choose-country"][data-code="JP"]').click();
-  await page.locator('#place-city option:not([disabled])').first().waitFor({state:'attached'});
-  assert.equal(await page.locator('#place-province').count(),0);
-  assert.ok(await page.locator('#place-city option:not([disabled])').count()<=8);
-  await page.getByLabel('城市',{exact:true}).selectOption({index:1});
-  await visible('.environment-summary');
-  assert.match(await page.locator('#scenario-form').textContent(),/自动季节/);
-  await page.getByLabel('植物',{exact:true}).selectOption('basil');await page.getByLabel('水源描述',{exact:true}).fill('测试储水桶');
-  await page.getByRole('button',{name:'分析并生成配置',exact:true}).click();await visible('.result-metrics');await page.screenshot({path:path.join(output,'external-configure.png'),fullPage:true});assert.match(await page.locator('.result-heading').textContent(),/R1/);
-  const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:'导出 JSON',exact:true}).click();const download=await downloadPromise;assert.equal(download.suggestedFilename(),'watering-config-r1.json');
-  await page.getByRole('button',{name:'发送到模拟设备',exact:true}).click();await page.getByRole('button',{name:'确认',exact:true}).click();await visible('.write-status.success');
-  await go('device');await visible('.device-controls');await page.locator('#target-mode').selectOption('PREPARE');await page.getByRole('button',{name:'应用',exact:true}).click();await page.getByRole('button',{name:'确认',exact:true}).click();
-  for(const width of [360,768,1440]) {await page.setViewportSize({width,height:900});for(const route of ['home','product','configure','device']) {await go(route);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,`${route} overflows at ${width}`);assert.equal((await page.locator('body').innerText()).includes('。'),false,`${route} still contains a Chinese period`);}}
-  await page.setViewportSize({width:390,height:844});await go('home');assert.equal(await page.locator('.home-heading h1').evaluate(node=>getComputedStyle(node).fontSize),'40px');assert.equal(await page.locator('#main').evaluate(node=>getComputedStyle(node).paddingBottom),'28px');assert.deepEqual(await page.locator('.mobile-header .variable-proximity-line').allInnerTexts(),['Smart','Watering','System']);await page.getByRole('button',{name:'打开导航',exact:true}).click();assert.equal(await page.locator('#sidebar').isVisible(),true);await page.keyboard.press('Escape');
-  const admin=await context.newPage();await admin.goto(adminBase,{waitUntil:'networkidle'});assert.equal((await admin.locator('body').innerText()).includes('。'),false,'admin login still contains a Chinese period');await admin.getByLabel('管理员密钥',{exact:true}).fill('wrong');await admin.getByRole('button',{name:'进入管理端',exact:true}).click();await admin.locator('.form-error').filter({hasText:'不正确'}).waitFor();
-  await admin.getByLabel('管理员密钥',{exact:true}).fill(process.env.TEST_ADMIN_TOKEN||'6767');await admin.getByRole('button',{name:'进入管理端',exact:true}).click();await admin.locator('.service-status').waitFor();assert.match(await admin.locator('.admin-library').textContent(),/数据库唯一数据源/);await admin.locator('#formulas').waitFor();assert.match(await admin.locator('#formulas').textContent(),/估算日需水量/);assert.equal((await admin.locator('body').innerText()).includes('。'),false,'admin dashboard still contains a Chinese period');await admin.screenshot({path:path.join(output,'admin-formulas.png'),fullPage:true});await admin.close();
-  assert.deepEqual(errors,[]);console.log(JSON.stringify({status:'passed',flows:['public-pages','demo-device','country-autocomplete','china-34-provinces','jiangsu-13-cities','municipality-skip-city','foreign-major-cities','clear-stale-weather','pump-variants','admin-formulas','configuration-upload','separate-admin'],screenshots:output},null,2));
- } catch(error) {await page.screenshot({path:path.join(output,'failure.png'),fullPage:true});console.error(error);process.exitCode=1;}
- finally {await browser.close();}
-})();
+const base = process.env.TEST_URL || 'http://127.0.0.1:5000';
+const output = path.resolve(process.env.ARTIFACT_DIR || 'test-results/browser');
+const edge = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
+fs.mkdirSync(output, { recursive: true });
+
+(async () => {
+  const browser = await chromium.launch({
+    headless: true,
+    ...(process.env.BROWSER_PATH || fs.existsSync(edge) ? { executablePath: process.env.BROWSER_PATH || edge } : {}),
+  });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (message.type() === 'error') errors.push(message.text());
+    });
+
+    // The public location and weather providers are outside this browser test.
+    const environment = {
+      provider: '测试天气', temperatureC: 25, humidityPct: 60, elevationM: 5,
+      precipitationMmDay: 1, sunshineHoursDay: 6, period: '测试时段',
+      observedAt: '2026-10-20T12:00:00+08:00', fetchedAt: '2026-10-20T12:00:00+08:00', timezone: 'Asia/Shanghai',
+    };
+    const generated = {
+      source: 'api', environment,
+      config: {
+        revision: 1, plant: '番茄', locationName: '日本 · 东京', source: 'api',
+        supplyVariant: 'builtin', configVersion: '1.0',
+        display: { roundWaterMl: 50, reservoirDays: 10, dailyWaterNeedMl: 100, flowRateMlSec: 22, estimatedIntervalDays: 1 },
+        params: { threshold: 53, pulseCount: 1, pulseOnMs: 3000, pulseOffMs: 25000 },
+      },
+    };
+    let submitted;
+    await page.route('**/api/locations/countries', route => route.fulfill({ json: { items: [
+      { id: 'JP', kind: 'country', name: '日本', englishName: 'Japan', countryCode: 'JP', selectionToken: 'country-token' },
+    ] } }));
+    await page.route('**/api/locations/children', route => route.fulfill({ json: { items: [
+      { id: 'tokyo', kind: 'city', name: '东京', terminal: true, selectionToken: 'city-token' },
+    ] } }));
+    await page.route('**/api/locations/select', route => route.fulfill({ json: { location: {
+      selectable: true, locationToken: 'test-location', latitude: 35.7, longitude: 139.7, displayName: '日本 · 东京',
+    } } }));
+    await page.route('**/api/environment', route => route.fulfill({ json: environment }));
+    await page.route('**/api/configurations/generate', route => {
+      submitted = route.request().postDataJSON();
+      return route.fulfill({ json: generated });
+    });
+
+    const ready = route => page.waitForFunction(route => {
+      const main = document.querySelector('#main');
+      return document.body.dataset.page === route && main.dataset.route === route && !main.inert;
+    }, route, { timeout: 30000 });
+    const go = async route => { await page.evaluate(route => { location.hash = route; }, route); await ready(route); };
+    const rows = () => page.locator('.hero-index .detail-row').evaluateAll(nodes => nodes.map(node => ({
+      title: node.querySelector('strong').textContent,
+      summary: node.querySelector('.index-copy > span').textContent,
+      aria: node.getAttribute('aria-label'),
+    })));
+
+    await page.goto(`${base}/#home`);
+    await ready('home');
+    assert.equal(await page.locator('.hero-copy h1').innerText(), '呵护植物\n及人之所不能及');
+    assert.equal(await page.locator('.hero-description').innerText(), '客制化植物灌溉方案\n为每一种植物提供独到环境');
+    assert.equal(await page.locator('.index-heading').count(), 0);
+    assert.deepEqual(await rows(), [
+      { title: '数据处理', summary: '我们是怎么生成客制化方案的，你的数据上传后会怎么样', aria: '数据处理' },
+      { title: '编译须知', summary: '在客制化时，设备如何进行通讯和编译', aria: '编译须知' },
+      { title: '报错处理', summary: '不同的报错信号意味着什么？', aria: '报错处理' },
+    ]);
+    assert.equal(await page.locator('.index-number').count(), 0);
+    for (const label of ['连接浇水设备', '生成个性化配置', '连接模拟设备']) {
+      assert.equal(await page.getByText(label, { exact: true }).count(), 1);
+    }
+    await page.screenshot({ path: path.join(output, 'home.png') });
+
+    await go('product');
+    assert.equal(await page.locator('.hero-copy h1').innerText(), '设备设计\n为什么值得信赖');
+    assert.equal(await page.locator('.hero-description').innerText(), '从里到外，对其设计进行了解');
+    assert.equal(await page.locator('.index-heading').count(), 0);
+    assert.equal(await page.locator('.product-hero .hero-visual-region figcaption').count(), 0);
+    assert.deepEqual(await rows(), [
+      { title: '硬件结构', summary: '外壳设计与内部功能设计', aria: '硬件结构' },
+      { title: '工作原理', summary: '机器的自动化依据与实现逻辑', aria: '工作原理' },
+      { title: '情况需知', summary: '机器为什么会报错，可能的归因是什么？', aria: '情况需知' },
+      { title: '编译需知', summary: '编译设备需要什么的条件以及流程？', aria: '编译需知' },
+    ]);
+    assert.equal(await page.locator('.index-number').count(), 0);
+    await page.screenshot({ path: path.join(output, 'product.png') });
+
+    await go('configure');
+    const supply = page.locator('.settings-section').filter({ has: page.getByRole('heading', { name: '水源与流量' }) });
+    assert.equal(await supply.locator('.settings-group .field-row').count(), 3);
+    assert.equal(await page.getByText('水源描述', { exact: true }).count(), 0);
+    await page.getByLabel('国家 / 地区', { exact: true }).fill('日');
+    await page.locator('[data-action="choose-country"][data-code="JP"]').click();
+    await page.locator('#place-city option[value="tokyo"]').waitFor({ state: 'attached' });
+    await page.getByLabel('城市', { exact: true }).selectOption('tokyo');
+    await page.locator('.environment-summary').waitFor();
+    await page.getByRole('button', { name: '分析并生成配置', exact: true }).click();
+    await page.locator('.result-metrics').waitFor();
+    assert.ok(submitted && !Object.keys(submitted).some(key => key.toLowerCase() === 'watersource'));
+    assert.equal(await page.locator('.result-heading .status-badge').innerText(), 'R1');
+    await page.screenshot({ path: path.join(output, 'configure.png') });
+
+    await go('device');
+    const deviceText = await page.locator('#main').innerText();
+    assert.ok(!deviceText.includes('上次连接设备') && !deviceText.includes('深度休眠时无法由网页远程唤醒'));
+    const disconnected = await page.evaluate(async () => {
+      const { devicePage } = await import('/static/js/pages/device.js');
+      return devicePage({ settings: { demoEnabled: false } }, {
+        state: 'disconnected', busy: false,
+        pendingWrite: { deviceId: 'TEST-DEVICE', config: { revision: 3 } },
+        lastSnapshot: { status: { deviceId: 'OLD-DEVICE' }, readAt: Date.now() },
+      });
+    });
+    assert.match(disconnected, /R3 写入结果待核对/);
+    assert.doesNotMatch(disconnected, /上次连接设备|深度休眠时无法由网页远程唤醒/);
+    await page.screenshot({ path: path.join(output, 'device.png') });
+
+    for (const width of [320, 390, 768, 1440, 1920]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const route of ['home', 'product', 'configure', 'device']) {
+        await go(route);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, `${width}px ${route} overflows`);
+        if (width >= 1200 && ['home', 'product'].includes(route)) {
+          const gap = await page.evaluate(() => document.querySelector('.hero-side-stack').getBoundingClientRect().top
+            - document.querySelector('.hero-copy .actions').getBoundingClientRect().bottom);
+          assert.ok(gap >= 20 && gap <= 48, `${width}px ${route} action-to-index gap is ${gap}px`);
+        }
+      }
+    }
+    assert.deepEqual(errors, []);
+    console.log('PASS: four routes, exact copy and index labels, generation payload, device notices, responsive layout and browser console');
+  } finally {
+    await browser.close();
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });

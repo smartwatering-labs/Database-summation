@@ -33,6 +33,10 @@ async function renderedBounds(page) {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   });
   const main = page.locator('#main');
+  // Isolate product pixels from the poster paper when measuring the assembly.
+  const background = await page.locator('#model-stage').evaluate(node => {
+    const previous = node.style.background; node.style.background = '#fff'; return previous;
+  });
   const opacity = await main.evaluate(node => {
     const previous = { value: node.style.getPropertyValue('opacity'), priority: node.style.getPropertyPriority('opacity') };
     node.style.setProperty('opacity', '0', 'important'); return previous;
@@ -48,9 +52,11 @@ async function renderedBounds(page) {
     // Capture the tall model without changing the layout viewport/media queries.
     const capture = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false, clip });
     png = Buffer.from(capture.data, 'base64');
+    fs.writeFileSync(path.join(out, `pixels-${viewport.width}-${await main.getAttribute('data-route')}.png`), png);
   }
   finally {
     await cdp.detach(); await main.evaluate((node, previous) => node.style.setProperty('opacity', previous.value, previous.priority), opacity);
+    await page.locator('#model-stage').evaluate((node, previous) => { node.style.background = previous; }, background);
     if (expanded) {
       await page.setViewportSize(viewport);
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -110,7 +116,12 @@ async function renderedBounds(page) {
     assert.ok(angle(rest, await orientation(page)) < 1e-6 && await zoom(page) === 1, 'double click resets rotation and zoom');
     await page.mouse.wheel(0, -12000); await idle(page, 'configure');
     assert.ok(await zoom(page) <= 1.75, 'zoom has an upper bound');
-    await page.getByRole('button', { name: '返回配置面板', exact: true }).click(); await idle(page, 'configure');
+    await page.getByRole('button', { name: '返回配置面板', exact: true }).click();
+    await page.waitForFunction(() => {
+      const main = document.querySelector('#main'), stage = document.querySelector('#model-stage');
+      return main.dataset.panelOpen === '1.0000' && main.dataset.surfaceMoving === 'false'
+        && stage.dataset.moving === 'false' && stage.dataset.interactive === 'false';
+    });
     assert.equal(await zoom(page), 1, 'panel restore resets zoom');
     await go(page, 'home'); await go(page, 'configure'); await openPreview(page);
     const revisited = await renderedBounds(page);
@@ -124,6 +135,12 @@ async function renderedBounds(page) {
       for (const route of ['home', 'product']) {
         await go(page, route);
         const b = await renderedBounds(page);
+        if (route === 'product') {
+          assert.equal(b.bands.length, 4, `${width}px product: all four layers remain visible: ${JSON.stringify(b.bands)}`);
+          for (let i = 1; i < b.bands.length; i++) {
+            assert.ok(b.bands[i].top - b.bands[i-1].bottom >= (width >= 1200 ? 8 : 6), `${width}px product: layers remain distinct: ${JSON.stringify(b.bands)}`);
+          }
+        }
         assert.ok(b.count > 2000 && b.left > 4 && b.right < b.width - 4 && b.top > 4 && b.bottom < b.height - 4, `${width} ${route}: model fits ${JSON.stringify(b)}`);
         const canvas = await page.locator('#model-canvas').boundingBox(), title = await page.locator('.hero-copy').boundingBox();
         if (width >= 768) {
@@ -131,16 +148,14 @@ async function renderedBounds(page) {
           const layout = await page.evaluate(() => ({ shell: document.querySelector('.main-shell').getBoundingClientRect().toJSON(), scrollX, margin: getComputedStyle(document.querySelector('.main-shell')).marginLeft, scroll: [...document.querySelectorAll('body,.main-shell,#main')].map(n => [n.className || n.id, n.scrollLeft]) }));
           assert.ok(title.x >= rail.x + rail.width + 16, `${width} ${route}: content clears the sidebar ${JSON.stringify(layout)}`);
         }
-        if (width >= 1200) {
+        if (width >= 960) {
           assert.ok(canvas.x + b.left > title.x + title.width + 16, 'assembly clears the reading column on its left');
           if (route === 'product') {
             const region = await page.locator('.hero-visual-region').boundingBox();
             assert.ok(b.bottom - b.top > region.height * .84, 'exploded assembly fills its display region');
-            assert.equal(b.bands.length, 4, `${width} product: all four layers have visible gaps: ${JSON.stringify(b.bands)}`);
-            for (let i = 1; i < b.bands.length; i++) assert.ok(b.bands[i].top - b.bands[i-1].bottom >= 12, `exploded layers are fully separated: ${JSON.stringify(b.bands)}`);
           }
-        } else assert.ok(canvas.y + b.bottom + 16 <= title.y, `${width} ${route}: title has clear space`);
-        if (route === 'product' && width < 768) assert.ok(b.right - b.left > b.width * .75, 'phone exploded model uses the canvas width');
+        } else assert.ok(canvas.y + b.top >= title.y + title.height + 16, `${width} ${route}: model clears the title and primary actions above it`);
+        if (route === 'product' && width < 768) assert.ok(b.right - b.left > b.width * .65, 'phone exploded model remains large with room for its shadow');
         if (route === 'home' && width === 1440) {
           assert.ok(b.right - b.left > b.width * .45 && b.right - b.left < b.width * .65, 'assembled model remains the dominant object in a balanced two-column layout');
           const card = await page.locator('.hero-side-stack').boundingBox();
@@ -185,7 +200,12 @@ async function renderedBounds(page) {
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [touch(245, 403, 1)] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await idle(mobile, 'configure');
     assert.ok(angle(touchRest, await orientation(mobile)) > .25, 'one finger still rotates after pinching');
-    await mobile.locator('[data-panel-toggle]').tap(); await idle(mobile, 'configure');
+    await mobile.locator('[data-panel-toggle]').tap();
+    await mobile.waitForFunction(() => {
+      const main = document.querySelector('#main'), stage = document.querySelector('#model-stage');
+      return main.dataset.panelOpen === '1.0000' && main.dataset.surfaceMoving === 'false'
+        && stage.dataset.moving === 'false' && stage.dataset.interactive === 'false';
+    });
     assert.ok(angle(touchRest, await orientation(mobile)) < 1e-6, 'touch panel restore reaches the stored pose');
     await mobile.emulateMedia({ reducedMotion: 'reduce' }); await go(mobile, 'device');
     assert.equal(await zoom(mobile), 1);

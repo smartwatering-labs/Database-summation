@@ -19,6 +19,8 @@ Thumbs.db
 **/.pio/
 **/.tools/
 **/build/
+# This directory is the vendored Three.js runtime, including gzip companions.
+!prototype/static/vendor/three/build/
 
 # Runtime databases, logs, and caches
 **/instance/

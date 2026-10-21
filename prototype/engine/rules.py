@@ -45,7 +45,6 @@ def validate_scenario(data, plants, builtin_flow=22):
     cleaned["reservoirLiters"] = number(data.get("reservoirLiters"), "reservoirLiters", 0.5, 1000)
     cleaned["flowRateMlSec"] = number(builtin_flow, "固定水泵流量", 1, 200) if variant == "builtin" else number(data.get("flowRateMlSec"), "flowRateMlSec", 1, 200)
     cleaned["currentRevision"] = number(data.get("currentRevision", 0), "currentRevision", 0, 2147483646, True)
-    cleaned["waterSource"] = text(data.get("waterSource"), "waterSource", 200)
     if data.get("configVersion", "1.0") not in ("1.0", "2.0"):
         raise ValidationError("配置格式版本无效", "configVersion")
     cleaned["configVersion"] = data.get("configVersion", "1.0")

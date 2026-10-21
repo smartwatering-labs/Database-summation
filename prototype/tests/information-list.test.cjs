@@ -13,7 +13,7 @@ const out=path.resolve('test-results/information-list');fs.mkdirSync(out,{recurs
    for(const entry of entries){
     const label=await entry.getAttribute('aria-label');await entry.click();await page.locator('#detail-dialog').waitFor({state:'visible'});
     assert.equal(await page.locator('#detail-title').innerText(),label);assert.ok((await page.locator('#detail-body').innerText()).length>100);
-    if(route==='product'&&label==='硬件组成'){
+    if(route==='product'&&label==='工作原理'){
      assert.match(await page.locator('#detail-body').innerText(),/AO3400A/);assert.match(await page.locator('#detail-body').innerText(),/电池电量.*没有独立/);
      await page.locator('.board-comparison img').first().scrollIntoViewIfNeeded();await page.waitForFunction(()=>[...document.querySelectorAll('.board-comparison img')].every(img=>img.complete&&img.naturalWidth>0));
      await page.screenshot({path:path.join(out,'hardware-details.png')});
@@ -22,7 +22,7 @@ const out=path.resolve('test-results/information-list');fs.mkdirSync(out,{recurs
     await page.keyboard.press('Escape');await page.locator('#detail-dialog').waitFor({state:'hidden'});assert.ok(await entry.evaluate(n=>document.activeElement===n),'closing details restores row focus');
    }
   }
-  await go('product');assert.deepEqual(await page.locator('.detail-row').evaluateAll(rows=>rows.map(r=>r.getAttribute('aria-label'))),['外壳结构','硬件组成','工作原理','使用方式']);await page.getByRole('button',{name:'工作原理',exact:true}).click();assert.match(await page.locator('#detail-body').innerText(),/DISPLAY[\s\S]*PREPARE[\s\S]*LONGRUN/);await page.keyboard.press('Escape');await page.locator('#detail-dialog').waitFor({state:'hidden'});
+  await go('product');assert.deepEqual(await page.locator('.detail-row').evaluateAll(rows=>rows.map(r=>r.getAttribute('aria-label'))),['硬件结构','工作原理','情况需知','编译需知']);await page.getByRole('button',{name:'情况需知',exact:true}).click();assert.match(await page.locator('#detail-body').innerText(),/DISPLAY[\s\S]*PREPARE[\s\S]*LONGRUN/);await page.keyboard.press('Escape');await page.locator('#detail-dialog').waitFor({state:'hidden'});
   for(const [width,height] of [[320,740],[390,844],[768,900],[1024,768],[1440,1000],[1920,1080]]){
    await page.setViewportSize({width,height});
    for(const route of ['home','product']){
@@ -31,7 +31,7 @@ const out=path.resolve('test-results/information-list');fs.mkdirSync(out,{recurs
     await page.screenshot({path:path.join(out,`${width}-${route}.png`),fullPage:true});
    }
   }
-  await page.setViewportSize({width:390,height:844});await go('home');await page.getByRole('button',{name:'进入工作区',exact:true}).click();await page.locator('#detail-body a[href="#configure"]').click();await idle('configure');assert.equal(await page.locator('#detail-dialog').getAttribute('open'),null);
+  await page.setViewportSize({width:390,height:844});await go('home');await page.getByRole('button',{name:'报错处理',exact:true}).click();await page.locator('#detail-body a[href="#configure"]').click();await idle('configure');assert.equal(await page.locator('#detail-dialog').getAttribute('open'),null);
   await page.emulateMedia({reducedMotion:'reduce'});await go('product');assert.equal(await page.locator('.page-exit-snapshot').count(),0);
   assert.deepEqual(errors,[]);console.log('PASS: unified lists, all seven details, latest dual-board content/assets, mode guide, keyboard/focus, responsive layouts, links and reduced motion');
  }finally{await browser.close();}

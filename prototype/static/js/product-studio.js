@@ -1,27 +1,27 @@
 // One local photography setup for the shared scene. Values are scene units,
 // linear light intensities and sRGB material colours; no downloaded HDRI.
 export const productStudio = {
-  renderer: { exposure: .95, maxPixelRatio: 1.5 },
+  renderer: { exposure: 1, maxPixelRatio: 1.5, maxViewportPixels: 3300000 },
   shell: {
-    color: 0xf3f2ef, metalness: 0, roughness: .38,
-    ior: 1.48, specularIntensity: 1, clearcoat: .015,
-    clearcoatRoughness: .42, envMapIntensity: .32,
+    color: 0xdce0e2, metalness: 0, roughness: .94,
+    ior: 1.48, specularIntensity: .26, clearcoat: 0,
+    clearcoatRoughness: 1, envMapIntensity: .16,
   },
   environment: {
-    background: 0x9d9fa2, blur: .06,
+    background: 0x7e858b, blur: .04, resolution: 128,
     cards: [
-      { position: [-5, 6, 5], size: [7, 6], power: 3.4 },
-      { position: [6, 2, 4], size: [3, 7], power: 1.2 },
-      { position: [2, 5, -6], size: [6, 4], power: 3 },
-      { position: [-1, 0, 8], size: [3, 8], power: 1.4 },
+      { position: [-5, 7, 4], size: [5, 6], power: 4.4 },
+      { position: [6, 2, 4], size: [2, 6], power: .65 },
+      { position: [3, 4, -5], size: [2, 7], power: 5 },
+      { position: [-1, 0, 8], size: [3, 7], power: .6 },
     ],
   },
   lights: {
-    hemisphere: { sky: 0xffffff, ground: 0xc1c4c8, intensity: .16 },
-    key: { position: [-3.5, 4, 4], size: [4, 5], color: 0xfffcf7, intensity: 5 },
-    fill: { position: [5, 1, 3], size: [3, 5], color: 0xf8faff, intensity: 1.8 },
-    rim: { position: [-1, 3.5, -6.5], size: [6, 1.5], color: 0xffffff, intensity: 3 },
-    shadow: { position: [-.6, 14, 4], intensity: .15, mapSize: 1536, extent: 6, normalBias: .012, bias: -.0001, radius: 7, blurSamples: 10 },
+    hemisphere: { sky: 0xf5f8ff, ground: 0x747e87, intensity: .2 },
+    key: { position: [-4, 5, 5], size: [4, 5], color: 0xfffaf2, intensity: 7.5 },
+    fill: { position: [5, 1, 3], size: [3, 5], color: 0xe5edff, intensity: 1.4 },
+    rim: { position: [3, 4, -5], size: [2, 6], color: 0xffffff, intensity: 5 },
+    shadow: { position: [-.6, 24, 1], intensity: .3, mapSize: 1536, extent: 6, normalBias: .012, bias: -.0001, radius: 9, blurSamples: 12 },
   },
   finishes: {
     'solder-mask': [0x07527d, 0, .52],
@@ -37,5 +37,5 @@ export const productStudio = {
     'insulator': [0xd8d5c9, 0, .52],
     'indicator-lens': [0x2f7062, 0, .18],
   },
-  ground: { homeOpacity: .13, productOpacity: .09, sizeRatio: 2.5, gap: .005, fadeInMs: 240, fadeOutMs: 120 },
+  ground: { homeOpacity: .16, productOpacity: .10, sizeRatio: 2.5, gap: .005, fadeInMs: 240, fadeOutMs: 120 },
 };

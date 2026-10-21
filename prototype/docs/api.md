@@ -41,7 +41,6 @@
   "light": "partial",
   "supplyVariant": "builtin",
   "reservoirLiters": 20,
-  "waterSource": "储水桶",
   "currentRevision": 0
 }
 ```

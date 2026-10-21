@@ -7,7 +7,7 @@ let route = 'home', config, THREE, renderer, scene, camera, rig, root, environme
 let ready = false, disposed = false, lost = false, frame = 0, open = 0;
 let width = 0, height = 0, parts = [], textures = [], frames = {};
 let poseTween, manualTarget, drag, pinch, interactive = false, interactionRequested = false;
-let resolveSettled, settledPromise = Promise.resolve(), lastFrameTime = 0;
+let resolveSettled, settledPromise = Promise.resolve(), lastFrameTime = 0, captureRequest;
 let zoom = 1, targetZoom = 1, resetZoom = 1;
 let layoutDirty = true, layout, renderWidth = 0, renderHeight = 0;
 let floor, floorRig, baseShell, floorHeight;
@@ -15,6 +15,8 @@ let groundOpacity = 0, groundTarget = 0, groundTween;
 const orbit = { yaw: 0, pitch: 0 };
 const pointers = new Map();
 const CAMERA_HEIGHT = 6;
+const displayPixelRatio = () => Math.min(devicePixelRatio, productStudio.renderer.maxPixelRatio,
+  Math.sqrt(productStudio.renderer.maxViewportPixels / Math.max(1, innerWidth * innerHeight)));
 
 function wake() {
   if (ready && !disposed && !lost && !document.hidden && !frame) frame = requestAnimationFrame(tick);
@@ -101,14 +103,18 @@ function layoutFor(page) {
   const region = main?.dataset.route === page ? main.querySelector('.hero-visual-region') : null;
   if (region) {
     const box = region.getBoundingClientRect(), stageBox = stage.getBoundingClientRect();
-    const inset = innerWidth < 768 ? 4 : 16;
-    const captionHeight = 56;
+    // Reserve room for the real ground shadow as well as the assembly bounds.
+    const inset = page === 'product' ? (innerWidth < 768 ? 14 : 10) : (innerWidth < 768 ? 20 : 24);
+    const captionHeight = page === 'product' && innerWidth >= 1200 ? 0 : 56;
     const usableWidth = Math.max(80, box.width - inset * 2);
     const usableHeight = Math.max(80, box.height - inset * 2 - captionHeight);
     const scale = Math.min(CAMERA_HEIGHT * usableWidth / height / reference.size.x,
       CAMERA_HEIGHT * usableHeight / height / reference.size.y);
     const x = box.left - stageBox.left + box.width / 2;
-    const y = box.top - stageBox.top + inset + usableHeight / 2;
+    // Lift the taller exploded assembly slightly so the lower shadow remains
+    // inside the canvas at 1000px-tall desktop viewports.
+    const lift = page === 'product' && innerWidth >= 960 ? 28 : 0;
+    const y = box.top - stageBox.top + inset + usableHeight / 2 - lift;
     return { scale, x: (x / width - .5) * cameraWidth - reference.center.x * scale,
       y: (.5 - y / height) * CAMERA_HEIGHT - reference.center.y * scale };
   }
@@ -212,11 +218,15 @@ function tick(time) {
       poseTween.viewport = { width: w, height: h };
     }
     width = w; height = h; layoutDirty = true;
+    const ratio = displayPixelRatio();
+    if (Math.abs(renderer.getPixelRatio() - ratio) > .01) renderer.setPixelRatio(ratio);
     camera.left = -CAMERA_HEIGHT * w / h / 2; camera.right = -camera.left;
     camera.top = CAMERA_HEIGHT / 2; camera.bottom = -camera.top; camera.updateProjectionMatrix();
   }
-  // A route's taller document canvas must not reallocate GPU buffers mid-motion.
-  const bufferHeight = Math.max(innerWidth < 768 ? 680 : 620, innerHeight - (innerWidth < 768 ? 120 : 76));
+  // Tall posters need enough vertical pixels to keep the model sharp. Keep the
+  // larger buffer across route changes; release that allocation on viewport resize.
+  const desiredHeight = Math.max(innerWidth < 768 ? 680 : 620, Math.min(h, 1600));
+  const bufferHeight = renderWidth === w ? Math.max(renderHeight, desiredHeight) : desiredHeight;
   if (renderWidth !== w || renderHeight !== bufferHeight) {
     renderWidth = w; renderHeight = bufferHeight; renderer.setSize(w, bufferHeight, false);
   }
@@ -249,6 +259,16 @@ function tick(time) {
   }
   updateGround(time);
   renderer.render(scene, camera);
+  if (captureRequest && !poseTween && !manualTarget) {
+    const request = captureRequest; captureRequest = null;
+    try {
+      createImageBitmap(canvas, {
+        resizeWidth: Math.max(1, Math.round(canvas.width * .5)),
+        resizeHeight: Math.max(1, Math.round(canvas.height * .5)),
+        resizeQuality: 'high',
+      }).then(request.resolve, () => request.resolve(null));
+    } catch { request.resolve(null); }
+  }
   stage.dataset.route = route; stage.dataset.open = open.toFixed(4);
   stage.dataset.orientation = rig.quaternion.toArray().join(','); stage.dataset.zoom = zoom.toFixed(4);
   if (poseTween || manualTarget || zoom !== targetZoom) wake(); else settle();
@@ -269,7 +289,7 @@ function moldedGrain() {
   const data = new Uint8Array(256 * 256 * 4); let seed = 9100;
   for (let i = 0; i < data.length; i += 4) {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    const value = 220 + (seed >>> 28);
+    const value = 244 + Math.floor((seed >>> 28) * 11 / 16);
     data[i] = data[i + 1] = data[i + 2] = value; data[i + 3] = 255;
   }
   const texture = new THREE.DataTexture(data, 256, 256);
@@ -296,7 +316,7 @@ function studioEnvironment() {
     card.position.set(...position); card.scale.set(...size, 1); card.lookAt(0, 0, 0);
     studio.add(card); materials.push(material);
   }
-  const pmrem = new THREE.PMREMGenerator(renderer); environment = pmrem.fromScene(studio, settings.blur);
+  const pmrem = new THREE.PMREMGenerator(renderer); environment = pmrem.fromScene(studio, settings.blur, .1, 100, { size: settings.resolution });
   scene.environment = environment.texture; pmrem.dispose(); geometry.dispose(); softbox.dispose(); materials.forEach(m => m.dispose());
 }
 function modelMaterial(source, shell, grain) {
@@ -339,20 +359,37 @@ function stableAreaLightBasis(shader) {
     T1 = normalize( tangent );`);
   shader.fragmentShader = shader.fragmentShader.replace('#include <lights_physical_pars_fragment>', chunk);
 }
+const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
 async function initialize() {
   try {
-    const response = await fetch('/static/assets/models/model.json');
-    if (!response.ok) throw Error('模型配置读取失败'); config = await response.json();
-    THREE = await import('../vendor/three/build/three.module.js'); if (disposed) return;
+    // Start the model transfer while the independent graphics modules load.
+    const modelData = fetch('/static/assets/models/model.json').then(async response => {
+      if (!response.ok) throw Error('模型配置读取失败');
+      const settings = await response.json();
+      if (settings.format === 'obj') return { settings };
+      const asset = await fetch(settings.url);
+      if (!asset.ok) throw Error('模型文件读取失败');
+      return { settings, bytes: await asset.arrayBuffer() };
+    });
+    const [three, { GLTFLoader }, { RectAreaLightUniformsLib }, data] = await Promise.all([
+      import('../vendor/three/build/three.module.js'),
+      import('../vendor/three/addons/loaders/GLTFLoader.js'),
+      import('../vendor/three/addons/lights/RectAreaLightUniformsLib.js'),
+      modelData,
+    ]);
+    THREE = three; config = data.settings;
+    // Let the heading, navigation and primary actions paint before GPU setup.
+    await yieldToBrowser(); if (disposed) return;
     renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, productStudio.renderer.maxPixelRatio)); renderer.setClearColor(0xffffff, 0);
+    renderer.setPixelRatio(displayPixelRatio()); renderer.setClearColor(0xffffff, 0);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = productStudio.renderer.exposure;
     renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.VSMShadowMap;
     scene = new THREE.Scene(); camera = new THREE.OrthographicCamera(-4, 4, 3, -3, .1, 100); camera.position.set(0, 0, 15);
     const lighting = productStudio.lights;
+    await yieldToBrowser();
     studioEnvironment(); scene.add(new THREE.HemisphereLight(lighting.hemisphere.sky, lighting.hemisphere.ground, lighting.hemisphere.intensity));
-    const { RectAreaLightUniformsLib } = await import('../vendor/three/addons/lights/RectAreaLightUniformsLib.js');
+    await yieldToBrowser();
     RectAreaLightUniformsLib.init();
     textures.push(...['LTC_FLOAT_1', 'LTC_FLOAT_2', 'LTC_HALF_1', 'LTC_HALF_2'].map(name => THREE.UniformsLib[name]));
     const shadow = lighting.shadow, extent = shadow.extent;
@@ -367,7 +404,7 @@ async function initialize() {
       const [{ OBJLoader }, { MTLLoader }] = await Promise.all([import('../vendor/three/addons/loaders/OBJLoader.js'), import('../vendor/three/addons/loaders/MTLLoader.js')]);
       root = await new OBJLoader().setMaterials(await new MTLLoader().loadAsync(config.materials)).loadAsync(config.url);
     } else {
-      const { GLTFLoader } = await import('../vendor/three/addons/loaders/GLTFLoader.js'); root = (await new GLTFLoader().loadAsync(config.url)).scene;
+      root = (await new GLTFLoader().parseAsync(data.bytes, new URL('.', new URL(config.url, location.href)).href)).scene;
     }
     if (disposed) { release(); return; }
     const grain = moldedGrain();
@@ -400,6 +437,7 @@ async function initialize() {
     rig = new THREE.Group(); rig.add(normalized); scene.add(rig); prepareFrames(unit); createGround(normalized);
     // Warm every material, including shells hidden by a directly opened hardware page.
     for (const part of parts) applyPartOpacity(part, 1);
+    await yieldToBrowser();
     await renderer.compileAsync(scene, camera);
     if (disposed) { release(); return; }
     // Navigation and panel actions can happen while the GLB or shaders are loading.
@@ -410,6 +448,7 @@ async function initialize() {
     wake();
   } catch (error) {
     stage.dataset.error = error.message; stage.classList.add('model-failed'); document.body.classList.remove('model-ready');
+    captureRequest?.resolve(null); captureRequest = null;
     console.warn('3D 展示暂不可用，全部业务操作仍可使用', error); ready = false; settle(); release();
   }
 }
@@ -489,16 +528,17 @@ canvas.addEventListener('keydown', event => {
 });
 canvas.setAttribute('role', 'img');
 canvas.setAttribute('aria-label', '三维模型，拖动或方向键旋转，滚轮或双指缩放，双击或 Home 键归位');
-canvas.addEventListener('webglcontextlost', event => { event.preventDefault(); lost = true; cancelPointers(); cancelAnimationFrame(frame); frame = 0; document.body.classList.remove('model-ready'); settle(); });
-canvas.addEventListener('webglcontextrestored', () => { lost = false; document.body.classList.add('model-ready'); beginPose(0); });
+canvas.addEventListener('webglcontextlost', event => { event.preventDefault(); lost = true; cancelPointers(); cancelAnimationFrame(frame); frame = 0; captureRequest?.resolve(null); captureRequest = null; stage.classList.add('model-failed'); document.body.classList.remove('model-ready'); settle(); });
+canvas.addEventListener('webglcontextrestored', () => { lost = false; stage.classList.remove('model-failed'); document.body.classList.add('model-ready'); beginPose(0); });
 addEventListener('resize', () => { layoutDirty = true; wake(); }); reduced.addEventListener('change', wake);
 document.addEventListener('visibilitychange', () => { if (document.hidden) { cancelPointers(); cancelAnimationFrame(frame); frame = 0; settle(); } else wake(); });
 const observer = new ResizeObserver(() => { layoutDirty = true; wake(); }); observer.observe(stage);
 observer.observe(document.querySelector('#main'));
-addEventListener('pagehide', () => { disposed = true; ready = false; observer.disconnect(); settle(); release(); }, { once: true });
+addEventListener('pagehide', () => { disposed = true; ready = false; observer.disconnect(); captureRequest?.resolve(null); captureRequest = null; settle(); release(); }, { once: true });
 export const modelStage = {
   update(next, publish = true) {
     layoutDirty = true;
+    if (next !== route) { captureRequest?.resolve(null); captureRequest = null; }
     if (publish) document.body.dataset.page = next;
     if (next !== route) {
       interactive = interactionRequested = false; stage.dataset.interactive = 'false'; stage.setAttribute('aria-hidden', 'true'); canvas.tabIndex = -1;
@@ -508,6 +548,14 @@ export const modelStage = {
   },
   setInteractive,
   whenSettled() { return settledPromise; },
+  captureStill() {
+    return new Promise(resolve => {
+      captureRequest?.resolve(null);
+      captureRequest = { resolve };
+      if (disposed || lost) { captureRequest = null; resolve(null); }
+      else if (ready) wake();
+    });
+  },
   diagnostics() {
     return ready ? {
       renderer: { revision: THREE.REVISION, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, pixelRatio: renderer.getPixelRatio() },

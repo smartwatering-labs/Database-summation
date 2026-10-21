@@ -8,6 +8,8 @@ const idle = (page, route) => page.waitForFunction(route => {
     && s.dataset.shadowMoving === 'false' && !m.inert && m.dataset.surfaceMoving === 'false';
 }, route);
 (async () => {
+  const { productStudio } = await import('../static/js/product-studio.js');
+  const homeOpacity=productStudio.ground.homeOpacity, productOpacity=productStudio.ground.productOpacity;
   const browser = await chromium.launch({ headless: true, executablePath: process.env.BROWSER_PATH || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', args: ['--enable-unsafe-swiftshader'] });
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }), errors = [];
@@ -48,25 +50,25 @@ const idle = (page, route) => page.waitForFunction(route => {
     assert.ok(values.some(a => a > 0 && a < .03) && values.some(a => a > .06 && a < .11), 'incoming shadow is drawn at low and intermediate alpha');
     assert.ok(values.every((a, i) => !i || a >= values[i - 1] - .0001), 'fade-in is monotonic');
     assert.ok(Math.max(...values.slice(1).map((a, i) => a - values[i])) < .025, 'no one-frame jump to full shadow');
-    assert.equal(await page.locator('#model-stage').getAttribute('data-shadow-opacity'), '0.1300');
+    assert.equal(await page.locator('#model-stage').getAttribute('data-shadow-opacity'), homeOpacity.toFixed(4));
     assert.equal(await page.locator('#model-stage').getAttribute('data-moving'), 'false');
     // Interrupt the fade-in with another route, then return while fading out.
     await start('device'); await page.clock.runFor(750); await start('home'); await page.clock.runFor(520);
     const partial = Number(await page.locator('#model-stage').getAttribute('data-shadow-opacity'));
-    assert.ok(partial > .005 && partial < .12, 'test interrupts a genuinely partial shadow');
+    assert.ok(partial > .005 && partial < homeOpacity, 'test interrupts a genuinely partial shadow');
     await start('product'); await page.clock.runFor(16);
     const interrupted = Number(await page.locator('#model-stage').getAttribute('data-shadow-opacity'));
     assert.ok(Math.abs(interrupted - partial) < .025, 'interruption retains current alpha');
     await page.clock.runFor(35); await start('home'); await page.clock.runFor(800);
     assert.equal(await page.locator('#model-stage').getAttribute('data-route'), 'home');
-    assert.equal(await page.locator('#model-stage').getAttribute('data-shadow-opacity'), '0.1300');
+    assert.equal(await page.locator('#model-stage').getAttribute('data-shadow-opacity'), homeOpacity.toFixed(4));
     assert.equal(await page.locator('#model-stage').getAttribute('data-shadow-moving'), 'false');
     await start('product'); await page.clock.runFor(800);
-    assert.equal(await page.locator('#model-stage').getAttribute('data-shadow-opacity'), '0.0900', 'product shadow reaches its own intensity');
+    assert.equal(await page.locator('#model-stage').getAttribute('data-shadow-opacity'), productOpacity.toFixed(4), 'product shadow reaches its own intensity');
     await page.emulateMedia({ reducedMotion: 'reduce' }); await start('device'); await page.clock.runFor(100);
     assert.equal(await page.locator('#model-stage').getAttribute('data-shadow-opacity'), '0.0000');
     await start('home'); await page.clock.runFor(100);
-    assert.equal(await page.locator('#model-stage').getAttribute('data-shadow-opacity'), '0.1300', 'reduced motion settles immediately');
+    assert.equal(await page.locator('#model-stage').getAttribute('data-shadow-opacity'), homeOpacity.toFixed(4), 'reduced motion settles immediately');
     fs.writeFileSync(path.join(out, 'draws.json'), JSON.stringify({ fadeOut, fadeIn, partial, interrupted }, null, 2));
     assert.deepEqual(errors, []);
     console.log('PASS: rendered shadow fade-in/out, continuous interruption, final route/intensity, reduced motion');

@@ -15,7 +15,7 @@ from datetime import date, datetime, timezone
 from functools import wraps
 from pathlib import Path
 
-from flask import Flask, g, jsonify, make_response, render_template, request
+from flask import Flask, g, jsonify, make_response, render_template, request, send_file
 from werkzeug.exceptions import HTTPException
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
@@ -150,6 +150,16 @@ def create_app(test_config=None):
     @app.before_request
     def begin_request():
         g.started = time.monotonic()
+        # Precompressed public graphics only. Configurations and API responses
+        # keep their existing no-store policy; no compression work runs per request.
+        if request.endpoint == "static" and request.method in ("GET", "HEAD") and request.accept_encodings["gzip"] > 0:
+            static_root = Path(app.static_folder).resolve()
+            source = (static_root / request.view_args["filename"]).resolve()
+            packed = source.with_name(source.name + ".gz")
+            if source.is_relative_to(static_root) and source.suffix in (".glb", ".js") and source.is_file() and packed.is_file() and packed.stat().st_mtime_ns >= source.stat().st_mtime_ns:
+                response = send_file(packed, mimetype="text/javascript" if source.suffix == ".js" else "model/gltf-binary", conditional=True, max_age=0)
+                response.headers["Content-Encoding"] = "gzip"
+                return response
         # Same-origin browser API. File uploads use application/json; no CORS.
         if request.method == "POST" and request.path.startswith("/api/"):
             if request.headers.get("Sec-Fetch-Site") == "cross-site":
@@ -159,6 +169,8 @@ def create_app(test_config=None):
 
     @app.after_request
     def finish_request(response):
+        if request.endpoint == "static":
+            response.vary.add("Accept-Encoding")
         if request.path.startswith("/api/"):
             elapsed = round((time.monotonic() - g.started) * 1000, 1)
             response.headers["Server-Timing"] = f"app;dur={elapsed}"

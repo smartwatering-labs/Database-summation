@@ -16,7 +16,7 @@ const out=path.resolve('test-results/hero');fs.mkdirSync(out,{recursive:true});
   const go=async route=>{await page.evaluate(r=>location.hash=r,route);await settled(route);};
   await settled('home');await page.evaluate(()=>window.originalCanvas=document.querySelector('#model-canvas'));
   for(const route of ['home','product','configure','device']){await go(route);await page.screenshot({path:path.join(out,route+'.png'),fullPage:true});}
-  await go('home');await page.getByRole('button',{name:'硬件组成',exact:true}).click();await page.waitForTimeout(600);
+  await go('home');await page.getByRole('button',{name:'数据处理',exact:true}).click();await page.waitForTimeout(600);
   assert.match(await page.locator('#detail-body').innerText(),/ESP32-C3/);await page.screenshot({path:path.join(out,'details.png')});await page.keyboard.press('Escape');await page.locator('#detail-dialog').waitFor({state:'hidden'});
   for(const from of ['home','product','configure','device'])for(const to of ['home','product','configure','device'].filter(r=>r!==from)){
    await go(from);await go(to);assert.ok(await page.evaluate(()=>window.originalCanvas===document.querySelector('#model-canvas')));
@@ -60,7 +60,8 @@ const out=path.resolve('test-results/hero');fs.mkdirSync(out,{recursive:true});
   await fallback.route('**/assets/models/model.json',r=>r.abort());
   await fallback.goto(process.env.TEST_URL||'http://127.0.0.1:5000');
   await fallback.locator('#model-stage.model-failed').waitFor();
-  assert.ok(await fallback.locator('.model-fallback').isVisible());
+  assert.equal(await fallback.locator('.model-fallback').count(),0);
+  assert.ok(await fallback.locator('.model-state-error').isVisible());
   await fallback.getByRole('button',{name:'连接模拟设备',exact:true}).click();
   await fallback.evaluate(()=>location.hash='device');
   await fallback.locator('.sensor-grid').waitFor();

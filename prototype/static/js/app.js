@@ -13,11 +13,12 @@ import { product } from './pages/product.js';
 import { configure, connectivityPanel, resultPanel, countryMatches, countryOptions } from './pages/configure.js';
 import { devicePage } from './pages/device.js';
 import { button, icon, escape as e, drawChart, modes } from './ui.js';
+import { getLanguage, setLanguage, localize, observeLanguage, translateText } from './i18n.js';
 
 const device = new DeviceController();
 const state = {
   settings: { demoEnabled: false, ble: {} }, plants: { items: [] },
-  scene: { plantId:'tomato', locationToken:'', cultivation:'pot', siteType:'outdoor', potLiters:10, light:'partial', season:'autumn', supplyVariant:'builtin', reservoirLiters:20, flowRateMlSec:null, waterSource:'储水桶，已接好水泵与供水管',siteTemperatureC:null,siteHumidityPct:null,siteObservedLocal:'' },
+  scene: { plantId:'tomato', locationToken:'', cultivation:'pot', siteType:'outdoor', potLiters:10, light:'partial', season:'autumn', supplyVariant:'builtin', reservoirLiters:20, flowRateMlSec:null, siteTemperatureC:null,siteHumidityPct:null,siteObservedLocal:'' },
   place:{countries:[],country:null,province:null,city:null,provinces:[],cities:[],countryText:'',countryOpen:false,active:-1,countriesLoading:false,countryError:''},
   result:null, resultTargetDeviceId:null, dirty:false, generating:false, environment:null, environmentLoading:false, historyOpen:false, historyPage:0, eventsOpen:false, eventsPage:0, eventsLoading:false,
   selectedLocation:null, locationCandidates:[], locationLoading:false, locationError:'', environmentError:'',
@@ -25,6 +26,51 @@ const state = {
 };
 const pages = {home:['首页','home',home],product:['产品介绍','leaf',product],configure:['个性化库编译','settings',configure],device:['硬件情况查看','device',devicePage]};
 const main = document.querySelector('#main'), dialog = document.querySelector('#dialog');
+observeLanguage();
+const reducedLanguageMotion=matchMedia('(prefers-reduced-motion: reduce)');
+const languageTargets=()=>[...document.querySelectorAll(
+  '#main .hero-copy,#main .hero-side-stack,#main .hero-visual-region figcaption,#main .panel-scroll,#main .workspace-label,#main .panel-toggle span,#navigation .nav-link span,#breadcrumb,.sidebar-bottom'
+)].filter(node=>node.getClientRects().length&&getComputedStyle(node).visibility!=='hidden');
+let finishLanguageSwitch;
+function transitionLanguage(update){
+  finishLanguageSwitch?.();
+  if(reducedLanguageMotion.matches||document.hidden||main.dataset.surfaceMoving==='true'){update();return;}
+  let stopped=false,applied=false,animations=[];
+  const clear=()=>animations.forEach(animation=>animation.cancel());
+  const finish=()=>{
+    if(stopped)return;
+    stopped=true;clear();
+    if(!applied){applied=true;update();}
+    delete document.documentElement.dataset.languageChanging;
+    if(finishLanguageSwitch===finish)finishLanguageSwitch=null;
+  };
+  finishLanguageSwitch=finish;
+  const play=(frames,options)=>{
+    animations=languageTargets().map(node=>node.animate(frames,options));
+    return Promise.all(animations.map(animation=>animation.finished.catch(()=>{})));
+  };
+  document.documentElement.dataset.languageChanging='out';
+  void (async()=>{
+    try{
+      await play([{opacity:1},{opacity:0}],{duration:85,easing:'cubic-bezier(.7,0,.84,0)',fill:'forwards'});
+      if(stopped)return;
+      applied=true;update();clear();
+      document.documentElement.dataset.languageChanging='in';
+      await play([{opacity:0},{opacity:1}],{duration:190,easing:'cubic-bezier(.16,1,.3,1)'});
+    }finally{
+      clear();
+      if(finishLanguageSwitch===finish){finishLanguageSwitch=null;delete document.documentElement.dataset.languageChanging;}
+    }
+  })();
+}
+addEventListener('hashchange',()=>finishLanguageSwitch?.());
+document.addEventListener('visibilitychange',()=>{if(document.hidden)finishLanguageSwitch?.();});
+document.querySelector('#language-toggle').addEventListener('click', () => transitionLanguage(() => {
+  setLanguage(getLanguage()==='zh'?'en':'zh');
+  if(state.place.country){state.place.countryText=getLanguage()==='en'?(state.place.country.englishName||state.place.country.name):state.place.country.name;const countryInput=document.querySelector('#country-search');if(countryInput)countryInput.value=state.place.countryText;}
+  document.title=pages[route][0]+' · 浇水';
+  if(state.ready&&route==='configure')render();else localize(document);
+}));
 let route = 'home', toastTimer, generationAbort, environmentAbort, environmentGeneration = 0, locationGeneration = 0, locationAbort, dialogSubmit, pollFailures = 0;
 let countryGeneration=0,countryAbort;
 let navigationVersion=0;
@@ -71,7 +117,6 @@ function toast(message, error = false) {
 function updateChrome() {
   const labels = {disconnected:'未连接',connecting:'正在连接',handshaking:'正在握手',ready:device.demo?'模拟设备 · 已连接':'设备已连接',error:'连接失败'};
   const label = labels[device.state];
-  document.querySelector('#connection-status').innerHTML = `<span class="status-dot ${device.state==='ready'?'online':''}"></span>${e(label)}`;
   document.querySelector('#sidebar-connection').textContent = label;
   const connect = document.querySelector('.sidebar-bottom [data-action="connect"]');
   connect.disabled = device.busy; connect.textContent = device.state==='ready' ? '连接管理' : '连接设备';
@@ -114,6 +159,7 @@ function render() {
   draw();
   modelStage.update(route);
   document.dispatchEvent(new CustomEvent('workspace:render',{detail:{route}}));
+  localize(document);
 }
 function invalidateLocation() {
   locationGeneration++;locationAbort?.abort();environmentGeneration++;environmentAbort?.abort();
@@ -185,7 +231,7 @@ async function loadPlace(node) {
 }
 async function selectCountry(code) {
   const country=state.place.countries.find(item=>item.id===code);if(!country)return;
-  Object.assign(state.place,{country,countryText:country.name,countryOpen:false,active:-1,province:null,city:null,provinces:[],cities:[]});
+  Object.assign(state.place,{country,countryText:getLanguage()==='en'?country.englishName||country.name:country.name,countryOpen:false,active:-1,province:null,city:null,provinces:[],cities:[]});
   await loadPlace(country);
 }
 
@@ -212,7 +258,9 @@ device.addEventListener('change', () => {
 });
 
 function closeMenu() {
-  document.querySelector('#sidebar').classList.remove('open');
+  const sidebar=document.querySelector('#sidebar');
+  sidebar.classList.remove('open');
+  sidebar.inert=!desktopNavigation.matches;
   document.querySelector('.main-shell').inert=false;
   const toggle=document.querySelector('#menu-toggle'); toggle.setAttribute('aria-expanded','false'); toggle.setAttribute('aria-label','打开导航'); toggle.innerHTML=icon('menu'); document.body.style.overflow='';
 }
@@ -238,7 +286,9 @@ async function navigate() {
 window.addEventListener('hashchange',navigate);
 document.querySelector('#menu-toggle').innerHTML=icon('menu');
 document.querySelector('#menu-toggle').addEventListener('click',()=>{
-  const open=document.querySelector('#sidebar').classList.toggle('open'), toggle=document.querySelector('#menu-toggle');
+  const sidebar=document.querySelector('#sidebar');
+  const open=sidebar.classList.toggle('open'), toggle=document.querySelector('#menu-toggle');
+  sidebar.inert=!open;
   toggle.setAttribute('aria-expanded',String(open)); toggle.setAttribute('aria-label',open?'关闭导航':'打开导航'); toggle.innerHTML=icon(open?'close':'menu');
   document.body.style.overflow=open?'hidden':'';
   document.querySelector('.main-shell').inert=open;
@@ -260,8 +310,9 @@ function openDialog(title, content, submit, label='确认') {
   dialog.showModal();
 }
 function confirmAction(title, description, operation, requiredText='') {
-  openDialog(title,`<p class="dialog-description">${e(description)}</p>${device.demo?'<p class="notice warning">当前操作目标为模拟设备</p>':''}${requiredText?`<label class="dialog-field">请输入“${e(requiredText)}”确认<input name="confirmation" required autocomplete="off"></label>`:''}`,async form=>{
-    if(requiredText&&new FormData(form).get('confirmation')!==requiredText)throw new Error('确认文字不一致');
+  const confirmationText=translateText(requiredText);
+  openDialog(title,`<p class="dialog-description">${e(description)}</p>${device.demo?'<p class="notice warning">当前操作目标为模拟设备</p>':''}${requiredText?`<label class="dialog-field">请输入“${e(confirmationText)}”确认<input name="confirmation" required autocomplete="off"></label>`:''}`,async form=>{
+    if(requiredText&&new FormData(form).get('confirmation')!==confirmationText)throw new Error('确认文字不一致');
     dialog.close(); await operation();
   });
 }

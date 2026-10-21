@@ -10,9 +10,17 @@ main{position:relative;z-index:2;display:flow-root;max-width:none;width:auto!imp
 body[data-page=configure] main,body[data-page=device] main{overflow:clip}
 #model-stage{position:absolute;left:0;right:0;top:76px;height:max(700px,calc(100svh - 76px));z-index:0;pointer-events:none;overflow:hidden;background:#fff;contain:layout paint}
 #model-canvas{position:absolute;inset:0;width:100%;height:100%}
+#model-defocus{position:absolute;top:78px;left:32px;right:32px;height:max(500px,calc(100svh - 188px));border-radius:28px;pointer-events:none;opacity:0;visibility:hidden;overflow:hidden;background:#fff;contain:paint;will-change:opacity}
+#model-defocus canvas{position:absolute;pointer-events:none;filter:blur(8px)}
 #model-stage[data-interactive=true]{pointer-events:auto}#model-stage[data-interactive=true] canvas{cursor:grab;touch-action:none}#model-stage[data-interactive=true] canvas:active{cursor:grabbing}main.model-view{pointer-events:none}main.model-view .workspace-tools{pointer-events:auto}.model-view-hint{display:none;position:absolute;left:36px;bottom:30px;margin:0;color:var(--muted);font-size:12px;pointer-events:none}.model-view .model-view-hint{display:block}
-.model-fallback{position:absolute;width:min(460px,60%);height:50%;object-fit:contain;left:25%;top:18%;opacity:.5}
-.model-ready .model-fallback{display:none}.model-failed #model-canvas{display:none}
+.model-failed #model-canvas,.model-failed #model-defocus{display:none}
+.model-state{position:absolute;inset:0 0 56px;display:grid;place-content:center;pointer-events:none;text-align:center;font-size:14px;color:#59605e}
+.model-state-loading{animation:model-state-breathe 1.8s ease-in-out infinite}
+.model-state-error,.model-ready .model-state{display:none}
+body:has(#model-stage.model-failed) .model-state-loading{display:none}
+body:has(#model-stage.model-failed) .model-state-error{display:block;max-width:22em;padding:24px;line-height:1.7}
+@keyframes model-state-breathe{50%{opacity:.45}}
+@media(prefers-reduced-motion:reduce){.model-state-loading{animation:none}}
 .model-caption{position:absolute;left:5%;top:78%;font-size:11px;color:var(--accent);letter-spacing:.03em}
 .hero-page{position:relative;min-height:max(700px,calc(100svh - 76px));padding:36px 42px;isolation:isolate}
 .hero-copy{position:absolute;left:42px;bottom:112px;padding:0;margin:0;display:block;max-width:600px}
@@ -93,6 +101,7 @@ dialog[open]::backdrop{animation:backdrop-enter .4s var(--motion-ease)}dialog[op
  .hero-product-heading{left:24px;top:20px;right:24px}.hero-product-heading p{font-size:11px;max-width:250px}.product-copy h2{font-size:33px}.product-copy>.actions{margin-top:20px}
  .hero-hotspots .disclosure-button{font-size:11px;min-height:40px;padding:9px 12px;gap:12px}.hero-hotspots .disclosure-button:nth-child(1){left:6%;top:21%}.hero-hotspots .disclosure-button:nth-child(2){right:6%;top:10%}.hero-hotspots .disclosure-button:nth-child(3){right:6%;bottom:auto;top:46%}.hero-hotspots .disclosure-button:nth-child(4){left:6%;top:49%}
  body[data-page=product] .hero-hotspots .disclosure-button:nth-child(2){top:24%}.hero-footer{left:24px;right:24px;bottom:24px;flex-wrap:wrap;gap:12px;font-size:10px}
+ #model-defocus{top:72px;left:14px;right:14px;height:max(400px,calc(100svh - 212px));border-radius:24px}
  .workspace-panel{width:calc(100% - 28px);margin:72px 14px 20px;height:max(400px,calc(100svh - 212px));border-radius:24px;background:rgba(245,248,253,.92)}.panel-scroll{padding:24px 20px}.workspace-panel .page-heading h1{font-size:25px}.workspace-panel .page-heading p{font-size:11px}.workspace-panel .configuration-layout,.device-dashboard{grid-template-columns:1fr;gap:24px}.workspace-panel .configuration-result:has(.result-empty){position:static}.workspace-panel .configuration-result{padding:20px}.workspace-panel .device-identity{grid-template-columns:1fr;gap:20px}
  .workspace-panel .field-row{padding:13px;gap:10px}.workspace-panel .field-label{min-width:70px}.workspace-panel .sensor-grid{grid-template-columns:repeat(2,1fr)}.workspace-panel .device-identity h2{font-size:20px}.workspace-panel .pagination{flex-wrap:wrap}
  .workspace-tools{left:18px;right:18px;top:18px;justify-content:space-between;gap:8px}.workspace-label{display:none}.workspace-caption .disclosure-button{font-size:11px;min-height:36px;padding:8px 12px;gap:8px}.panel-toggle{font-size:11px;min-width:144px;gap:6px;padding:8px 12px}.panel-toggle svg:first-child{display:none}.model-caption{left:24px;right:auto;top:82%;font-size:10px}

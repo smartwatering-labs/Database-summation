@@ -1,18 +1,72 @@
-// One clock owns content visibility, panel docking and the model's defocus.
-// No backdrop-filter on the panel: nested opacity/filter layers delay it in Chromium.
+// Content reveal and panel docking share one clock. The stationary model is
+// defocused only below an open workspace panel.
 import { modelStage } from './model-stage.js';
 const main=document.querySelector('#main'),stage=document.querySelector('#model-stage');
+const defocus=document.createElement('div'),stillCanvas=document.createElement('canvas');
+defocus.id='model-defocus';defocus.setAttribute('aria-hidden','true');
+stillCanvas.setAttribute('aria-hidden','true');defocus.append(stillCanvas);stage.append(defocus);
+const stillContext=stillCanvas.getContext('2d',{alpha:true});
+function alignStill(){
+ const source=stage.getBoundingClientRect(),underlay=defocus.getBoundingClientRect();
+ Object.assign(stillCanvas.style,{
+  width:source.width+'px',height:source.height+'px',
+  left:(source.left-underlay.left)+'px',top:(source.top-underlay.top)+'px'
+ });
+}
+function installStill(bitmap){
+ stillCanvas.width=bitmap.width;stillCanvas.height=bitmap.height;
+ // Rasterize the blur once while the model is settled. Opacity animation
+ // then composites an ordinary bitmap instead of filtering a large canvas.
+ if('filter' in stillContext){
+  const scale=bitmap.width/Math.max(1,stage.getBoundingClientRect().width);
+  stillContext.filter='blur('+(8*scale).toFixed(2)+'px)';
+  stillCanvas.style.filter='none';
+ }else stillCanvas.style.filter='blur(8px)';
+ stillContext.drawImage(bitmap,0,0);
+ stillContext.filter='none';
+ bitmap.close();
+ alignStill();
+}
+new ResizeObserver(()=>{if(defocus.style.visibility==='visible')alignStill();}).observe(stage);
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
-let value={reveal:1,panel:1,exitBlur:0},workspace=false,page='home',panelTarget=1,exitSnapshot;
-let frame=0,finish,pendingTarget;
+let value={reveal:1,panel:1},workspace=false,page='home',panelTarget=1,exitSnapshot;
+let frame=0,finish,pendingTarget,defocusVersion=0,stillReady=false;
+function hideStill(){
+ stillReady=false;
+ defocus.style.opacity='0';
+ defocus.style.visibility='hidden';
+}
+function syncStill(){
+ const opacity=stillReady&&workspace?value.reveal*value.panel:0;
+ defocus.style.opacity=String(opacity);
+ defocus.style.visibility=opacity>0?'visible':'hidden';
+}
+async function prepareStill(version,fadeOnReady=false){
+ await modelStage.whenSettled();
+ if(version!==defocusVersion||!workspace||!panelTarget||document.hidden)return false;
+ const still=await modelStage.captureStill();
+ if(!still)return false;
+ if(version!==defocusVersion||!workspace||!panelTarget||document.hidden||stage.dataset.moving!=='false'){still.close();return false;}
+ installStill(still);
+ stillReady=true;
+ syncStill();
+ if(fadeOnReady&&value.reveal===1&&value.panel===1&&!reduced.matches)
+  defocus.animate([{opacity:0},{opacity:1}],{duration:150,easing:'cubic-bezier(.33,1,.68,1)'});
+ return true;
+}
+async function warmStill(){
+ if(!stillReady||reduced.matches||document.hidden)return;
+ // Let the browser prepare the bitmap layer before the visible motion.
+ defocus.style.visibility='visible';
+ defocus.style.opacity='.001';
+ await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+}
 function paint(){
  main.style.opacity=value.reveal;
- main.style.filter=value.reveal===1?'none':`blur(${(1-value.reveal)*9}px)`;
  main.style.setProperty('--panel-open',value.panel);
- const blur=Math.max(value.exitBlur,workspace?8*value.reveal*value.panel:0);
- stage.style.filter=blur<.001?'none':`blur(${blur}px)`;
  main.dataset.reveal=value.reveal.toFixed(4);
  main.dataset.panelOpen=value.panel.toFixed(4);
+ syncStill();
 }
 function cancel(){cancelAnimationFrame(frame);frame=0;finish?.(false);finish=null;}
 function animate(target,duration){
@@ -54,20 +108,49 @@ function captureExit(){
  if(scroll)snapshot.querySelector('.panel-scroll').scrollTop=scroll.scrollTop;
  exitSnapshot=snapshot;
  const clean=()=>{snapshot.remove();if(exitSnapshot===snapshot)exitSnapshot=null;};
- snapshot.animate([{opacity:value.reveal,filter:main.style.filter},{opacity:0,filter:'blur(6px)'}],{duration:120,easing:'cubic-bezier(.2,.7,.3,1)',fill:'forwards'}).finished.then(clean,clean);
+ snapshot.animate([{opacity:value.reveal,transform:'translateY(0)'},{opacity:0,transform:'translateY(-4px)'}],{duration:120,easing:'cubic-bezier(.2,.7,.3,1)',fill:'forwards'}).finished.then(clean,clean);
 }
 export const surfaceMotion={
  hide(){return animate({reveal:0},70);},
  setPage(next,animated=false){
   if(animated)captureExit();else{exitSnapshot?.remove();exitSnapshot=null;}
-  const previousBlur=Math.max(value.exitBlur,workspace?8*value.reveal*value.panel:0);
-  cancel();page=next;workspace=['configure','device'].includes(next);panelTarget=1;value.panel=1;
-  value.reveal=animated?0:1;value.exitBlur=animated?previousBlur:0;main.classList.remove('model-view');paint();
-  if(animated)animate({exitBlur:0},120);
+  cancel();++defocusVersion;hideStill();
+  page=next;workspace=['configure','device'].includes(next);panelTarget=1;value.panel=1;
+  value.reveal=animated?0:1;main.classList.remove('model-view');paint();
  },
- reveal(animated=true){return animate({reveal:1},animated?150:0);},
+ async reveal(animated=true){
+  const version=defocusVersion;
+  // The still is ready before content appears. Blur and reveal then use
+  // the same cubic progress, rather than two sequential transitions.
+  if(workspace&&animated){
+   await prepareStill(version);
+   if(version===defocusVersion)await warmStill();
+  }
+  if(version!==defocusVersion)return false;
+  const motion=animate({reveal:1},animated?150:0);
+  if(workspace&&!animated)void prepareStill(version,true);
+  return motion;
+ },
  bind,
- toggle(){panelTarget=panelTarget?0:1;modelStage.setInteractive(!panelTarget);bind();return animate({panel:panelTarget},440);}
+ toggle(){
+  const version=++defocusVersion;
+  if(panelTarget){
+   panelTarget=0;modelStage.setInteractive(true);bind();
+   const motion=animate({panel:0},440);
+   void motion.then(()=>{if(version===defocusVersion)hideStill();});
+   return motion;
+  }
+  panelTarget=1;bind();
+  return (async()=>{
+   // Capture the sharp preview once before its return pose. The panel
+   // and its blurred underlay then move on one clock; live WebGL stays clear.
+   await prepareStill(version);
+   if(version===defocusVersion)await warmStill();
+   if(version!==defocusVersion||!panelTarget)return false;
+   modelStage.setInteractive(false);
+   return animate({panel:1},440);
+  })();
+ }
 };
 let touchToggle,lastTouchToggle=0;
 document.addEventListener('pointerdown',e=>{const button=e.target.closest('[data-panel-toggle]');if(button&&e.pointerType==='touch')touchToggle={button,id:e.pointerId,x:e.clientX,y:e.clientY};});
@@ -86,4 +169,8 @@ document.addEventListener('click',e=>{
  surfaceMotion.toggle();
 });
 reduced.addEventListener('change',()=>{if(reduced.matches&&frame){value={...pendingTarget};cancel();paint();main.dataset.surfaceMoving='false';}});
-addEventListener('pagehide',cancel,{once:true});
+document.addEventListener('visibilitychange',()=>{
+ if(document.hidden){++defocusVersion;hideStill();}
+ else if(workspace&&panelTarget)void prepareStill(++defocusVersion);
+});
+addEventListener('pagehide',()=>{cancel();},{once:true});

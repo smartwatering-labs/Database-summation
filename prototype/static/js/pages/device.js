@@ -29,8 +29,7 @@ export function devicePage(state, device) {
   if (!ready) return `${pageTitle('硬件情况查看', '连接并完成握手后，查看设备当前状态与最近一周采样')}
     <section class="empty-state device-empty"><span class="preview-icon">${icon('bluetooth',36)}</span><h2>${device.busy ? '正在连接设备' : '等待连接浇水设备'}</h2><p>${e(device.error || '尚未取得设备数据；请给设备供电，等待定时唤醒后再连接蓝牙')}</p><div class="actions">${button('连接设备','connect',{type:'primary',disabled:device.busy})}${state.settings.demoEnabled ? button('体验模拟设备','demo',{type:'outline',disabled:device.busy}) : ''}</div></section>
     ${device.pendingWrite ? notice(`R${e(device.pendingWrite.config.revision)} 写入结果待核对。请连接原设备 ${e(device.pendingWrite.deviceId)}，读回配置后再发送。`,'warning') : ''}
-    ${device.lastSnapshot ? notice(`上次连接设备 ${e(device.lastSnapshot.status.deviceId)}；最近读取距今 ${e(age(device.lastSnapshot.readAt))}。下方旧值仅供核对连接状态。${device.lastSnapshot.status.sample ? `上次需求值 ${e(device.lastSnapshot.status.sample.wateringDemand ?? '—')} / 100。` : ''}`,'warning') : ''}
-    ${notice('深度休眠时无法由网页远程唤醒；设备休眠或重启后，需要重新连接和握手')}`;
+    `;
   const data = device.status, sample = data.sample;
   const role=device.handshake.authorizationRole||'owner',canControl=role!=='viewer',canManage=role==='owner';
   const configurationOnly = device.handshake.runtimeProfile === 'configuration-oled';

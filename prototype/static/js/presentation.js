@@ -9,11 +9,11 @@ function disclosure(parent,nodes,title,label,id){
 function informationIndex(sections,label){
  const panel=document.createElement('section');panel.className='hero-index-panel';panel.setAttribute('aria-label',label);
  const list=document.createElement('ol');list.className='hero-index';
- sections.forEach((section,i)=>{
+ sections.forEach(section=>{
   const {detailSection:id,label:title,summary}=section.dataset;details.set(id,{title,html:section.innerHTML});
   const item=document.createElement('li'),button=document.createElement('button');button.type='button';button.className='detail-row';button.dataset.detail=id;
   button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-controls','detail-dialog');button.setAttribute('aria-label',title);
-  button.innerHTML=`<span class="index-number" aria-hidden="true">${String(i+1).padStart(2,'0')}</span><span class="index-copy"><strong>${title}</strong><span>${summary}</span></span>${icon('arrow',17)}`;
+  button.innerHTML=`<span class="index-copy"><strong>${title}</strong><span>${summary}</span></span>${icon('arrow',17)}`;
   item.append(button);list.append(item);
  });
  panel.append(list);return panel;
@@ -22,11 +22,10 @@ function openDetails(id,trigger){
  const detail=details.get(id);if(!detail)return;returnFocus=trigger;closing=false;closeVersion++;dialog.classList.remove('is-closing');
  document.querySelector('#detail-title').textContent=detail.title;const body=document.querySelector('#detail-body');body.innerHTML=detail.html;
  oldOverflow=document.body.style.overflow;document.body.style.overflow='hidden';dialog.showModal();
- if(!reduced.matches)Array.from(body.children).forEach((node,i)=>node.animate([{opacity:0,transform:'translateY(14px)',filter:'blur(5px)'},{opacity:1,transform:'translateY(0)',filter:'blur(0)'}],{duration:480,delay:Math.min(i*55,180),fill:'backwards',easing:'cubic-bezier(.22,1,.36,1)'}));
 }
 export function closeDetails(){closeVersion++;if(dialog.open)dialog.close();}
 dialog.addEventListener('close',()=>{document.body.style.overflow=oldOverflow;if(returnFocus?.isConnected)returnFocus.focus({preventScroll:true});closing=false;dialog.classList.remove('is-closing');});
-function animatedClose(){if(closing)return;closing=true;if(reduced.matches){closeDetails();return;}const version=++closeVersion;dialog.classList.add('is-closing');dialog.animate([{opacity:1,transform:'translateY(0)'},{opacity:0,transform:'translateY(10px)'}],{duration:160,easing:'ease-out'}).finished.then(()=>{if(version===closeVersion)closeDetails();}).catch(()=>{});}
+function animatedClose(){if(closing)return;closing=true;if(reduced.matches){closeDetails();return;}const version=++closeVersion;dialog.classList.add('is-closing');dialog.animate([{opacity:1,transform:'translateY(0)'},{opacity:0,transform:'translateY(6px)'}],{duration:150,easing:'cubic-bezier(.7,0,.84,0)'}).finished.then(()=>{if(version===closeVersion)closeDetails();}).catch(()=>{});}
 dialog.addEventListener('cancel',e=>{e.preventDefault();animatedClose();});
 dialog.addEventListener('click',e=>{const b=dialog.getBoundingClientRect();if(e.target.closest('[data-detail-close]')||(e.target===dialog&&(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)))animatedClose();});
 document.addEventListener('click',e=>{const trigger=e.target.closest('[data-detail]');if(trigger)openDetails(trigger.dataset.detail,trigger);});
@@ -56,7 +55,7 @@ export function enhancePage(main,route){
  const index=informationIndex(Array.from(main.querySelectorAll('[data-detail-section]')),route==='home'?'从这里开始':'了解产品');
  const visual=document.createElement('figure');visual.className='hero-visual-region';
  visual.setAttribute('aria-label',route==='home'?'浇水设备完整外观':'顶盖、上层主板、下层主板与底壳的分解视图');
- visual.innerHTML=route==='home'?'<figcaption><strong>智能浇水设备</strong><span>双层结构 · 蓝牙配置 · 独立运行</span></figcaption>':'<figcaption><strong>由外而内，理解每一层</strong><span>顶盖 / 上层主板 / 下层主板 / 底壳</span></figcaption>';
+ visual.innerHTML=`<div class="model-state" role="status"><span class="model-state-loading">正在呈现设备模型</span><span class="model-state-error">暂时无法显示模型，刷新页面可重试。</span></div>`+(route==='home'?'<figcaption><span>双层结构 · 蓝牙配置 · 独立运行</span></figcaption>':'');
  if(route==='home'){
   const heading=main.querySelector('.home-heading');heading.classList.add('hero-copy');
   const stack=document.createElement('aside');stack.className='hero-side-stack';stack.setAttribute('aria-label','开始使用');
@@ -66,9 +65,10 @@ export function enhancePage(main,route){
   const content=document.createElement('div');content.className='hero-content';content.append(heading,stack);hero.append(content,visual);
  }else{
   const intro=main.querySelector('.product-copy-source');
-  const copy=document.createElement('div');copy.className='hero-copy product-copy';copy.append(...intro.childNodes,index);
+  const copy=document.createElement('div');copy.className='hero-copy product-copy';copy.append(...intro.childNodes);
   const actions=main.querySelector('.actions.content-section');actions.classList.remove('content-section');copy.append(actions);
-  hero.append(copy,visual);
+  const stack=document.createElement('aside');stack.className='hero-side-stack';stack.setAttribute('aria-label','了解产品');stack.append(index);
+  const content=document.createElement('div');content.className='hero-content';content.append(copy,stack);hero.append(content,visual);
  }
  main.replaceChildren(hero);
 }
@@ -80,4 +80,4 @@ toggle.addEventListener('click',()=>{
  rail.inert=collapsed;rail.setAttribute('aria-hidden',String(collapsed));
 });
 const narrow=matchMedia('(max-width:767px)');
-narrow.addEventListener('change',()=>{document.body.classList.remove('sidebar-collapsed');rail.inert=false;rail.removeAttribute('aria-hidden');toggle.setAttribute('aria-expanded','true');toggle.setAttribute('aria-label','收起侧边栏');});
+narrow.addEventListener('change',()=>{document.body.classList.remove('sidebar-collapsed');rail.inert=narrow.matches&&!rail.classList.contains('open');rail.removeAttribute('aria-hidden');toggle.setAttribute('aria-expanded','true');toggle.setAttribute('aria-label','收起侧边栏');});

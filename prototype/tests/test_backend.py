@@ -36,7 +36,7 @@ class BackendTests(unittest.TestCase):
         self.location = self.client.post('/api/locations/select',json={'selectionToken':item['selectionToken']}).json['location']
         self.scene = dict(plantId='tomato', locationToken=self.location['locationToken'], cultivation='pot', potLiters=10,
                           light='partial', supplyVariant='builtin', reservoirLiters=20,
-                          waterSource='private-source-marker-123', currentRevision=0)
+                          currentRevision=0)
         self.weather_patch = patch('engine.environment.urlopen', side_effect=lambda *a, **k: io.BytesIO(json.dumps(WEATHER).encode()))
         self.weather_patch.start()
 
@@ -135,7 +135,7 @@ class BackendTests(unittest.TestCase):
 
     def test_input_validation(self):
         for update in ({'plantId':'unknown'}, {'potLiters':0}, {'supplyVariant':'valve','flowRateMlSec':-1},
-                       {'supplyVariant':'unknown'}, {'reservoirLiters':True}, {'currentRevision':-1}, {'waterSource':''},
+                       {'supplyVariant':'unknown'}, {'reservoirLiters':True}, {'currentRevision':-1},
                        {'supplyVariant':'valve','flowRateMlSec':float('inf')}, {'light':'invented'}, {'currentRevision':1.5}):
             with self.subTest(update=update):
                 self.assertEqual(self.generate(**update).status_code, 400)

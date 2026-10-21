@@ -1,4 +1,5 @@
 import { button, escape as e, pageTitle, notice, metric, icon } from '../ui.js';
+import { getLanguage, translateText } from '../i18n.js';
 
 const options = (items, selected) => items.map(([value, label]) => `<option value="${e(value)}" ${String(selected) === String(value) ? 'selected' : ''}>${e(label)}</option>`).join('');
 const field = (label, control, help = '') => `<div class="field-row"><div class="field-label">${label}${help ? `<span>${help}</span>` : ''}</div>${control}</div>`;
@@ -7,22 +8,23 @@ const input = (name, label, value, min, max, step = '1') => `<input type="number
 export function countryMatches(state) {
   const q=state.place.countryText.trim().toLocaleLowerCase();
   return state.place.countries.filter(item=>!q||[item.name,item.englishName,item.countryCode].some(value=>value.toLocaleLowerCase().startsWith(q)))
-    .sort((a,b)=>a.name.localeCompare(b.name,'zh-CN'));
+    .sort((a,b)=>(getLanguage()==='en'?a.englishName||a.name:a.name).localeCompare(getLanguage()==='en'?b.englishName||b.name:b.name,getLanguage()==='en'?'en':'zh-CN'));
 }
 export function countryOptions(state) {
   const p=state.place,items=countryMatches(state);
   if(p.countriesLoading)return '<div class="country-empty" role="status">正在加载外部国家列表…</div>';
   if(p.countryError)return '<div class="country-empty">国家列表加载失败，请点击下方重新加载</div>';
-  return items.length?items.map((item,index)=>`<button type="button" role="option" id="country-option-${index}" aria-selected="${p.active===index}" data-action="choose-country" data-code="${e(item.id)}">${e(item.name)}<span>${e(item.englishName)}</span></button>`).join(''):'<div class="country-empty">没有匹配的国家，请尝试中文名称或英文名称</div>';
+  return items.length?items.map((item,index)=>`<button type="button" role="option" id="country-option-${index}" aria-selected="${p.active===index}" data-action="choose-country" data-code="${e(item.id)}">${e(getLanguage()==='en'?item.englishName||item.name:item.name)}<span>${e(getLanguage()==='en'?item.countryCode:item.englishName)}</span></button>`).join(''):'<div class="country-empty">没有匹配的国家，请尝试中文名称或英文名称</div>';
 }
 function locationPanel(state) {
   const scene=state.scene,location=state.selectedLocation,p=state.place;
   const seasons={spring:'春季',summer:'夏季',autumn:'秋季',winter:'冬季'};
-  const citySelect=field('<label for="place-city">城市</label>',`<select id="place-city" aria-label="城市" data-unavailable="${state.locationLoading||!p.cities.length}"><option value="" disabled ${!p.city?'selected':''}>${state.locationLoading?'正在加载城市…':p.cities.length?'请选择城市':'请先选择省份'}</option>${options(p.cities.map(x=>[x.id,x.name]),p.city?.id)}</select>`);
+  const placeName=x=>getLanguage()==='en'?x.englishName||translateText(x.name):x.name;
+  const citySelect=field('<label for="place-city">城市</label>',`<select id="place-city" aria-label="城市" data-unavailable="${state.locationLoading||!p.cities.length}"><option value="" disabled ${!p.city?'selected':''}>${state.locationLoading?'正在加载城市…':p.cities.length?'请选择城市':'请先选择省份'}</option>${options(p.cities.map(x=>[x.id,placeName(x)]),p.city?.id)}</select>`);
   return `<section class="settings-section"><h2>植物与地点</h2><div class="settings-group">
   ${field('<label for="plantId">植物</label>',select('plantId','植物',state.plants.items.map(x=>[x.id,x.name+' · '+x.category+' · '+(({reviewed:'资料已核对',uncertain:'资料存疑',engineering:'工程建议'})[x.review?.status]||'工程建议')]),scene.plantId))}
   <div class="field-row vertical country-field"><label for="country-search">国家 / 地区</label><input id="country-search" role="combobox" aria-autocomplete="list" aria-expanded="${p.countryOpen}" aria-controls="country-options" ${p.active>=0?`aria-activedescendant="country-option-${p.active}"`:''} value="${e(p.countryText)}" maxlength="80" placeholder="输入国家名称，例如：中" autocomplete="off"><div id="country-options" class="country-options" role="listbox" aria-label="国家建议" ${p.countryOpen?'':'hidden'}>${countryOptions(state)}</div></div>
-  <div id="place-dependent">${p.country?(p.country.id==='CN'?`${field('<label for="place-province">省份 / 直辖市</label>',`<select id="place-province" aria-label="省份 / 直辖市" data-unavailable="${!p.provinces.length}"><option value="" disabled ${!p.province?'selected':''}>${p.provinces.length?'请选择省份或直辖市':'正在加载省份…'}</option>${options(p.provinces.map(x=>[x.id,x.name]),p.province?.id)}</select>`)}${p.province?.terminal?'<p class="location-help">已选择直辖市或特别行政区，无需再选择城市</p>':citySelect}`:citySelect):''}</div></div>
+  <div id="place-dependent">${p.country?(p.country.id==='CN'?`${field('<label for="place-province">省份 / 直辖市</label>',`<select id="place-province" aria-label="省份 / 直辖市" data-unavailable="${!p.provinces.length}"><option value="" disabled ${!p.province?'selected':''}>${p.provinces.length?'请选择省份或直辖市':'正在加载省份…'}</option>${options(p.provinces.map(x=>[x.id,placeName(x)]),p.province?.id)}</select>`)}${p.province?.terminal?'<p class="location-help">已选择直辖市或特别行政区，无需再选择城市</p>':citySelect}`:citySelect):''}</div></div>
   <div class="field-footnote">${button('重新加载地点列表','reload-locations',{type:'text',disabled:p.countriesLoading||state.generating,extra:'type="button"'})}</div>
   <p class="caption muted">中国按省份和城市选择，直辖市直接使用；其他国家提供主要城市，列表由外部接口加载，不保存到网站数据库</p>
   <div id="location-error">${state.locationError||p.countryError?notice(e(state.locationError||p.countryError),'error'):''}</div>
@@ -60,7 +62,6 @@ export function configure(state, device) {
   ${field('<label for="supplyVariant">供水装置</label>',select('supplyVariant','供水装置',[['builtin','自带水泵供水'],['valve','电磁阀控制用户水泵']],s.supplyVariant))}
   ${field('<label for="reservoirLiters">可用储水量（L）</label>', input('reservoirLiters','可用储水量',s.reservoirLiters,0.5,1000,'0.5'))}
   ${s.supplyVariant==='valve'?field('<label for="flowRateMlSec">用户水泵流量（mL/s）</label>',input('flowRateMlSec','用户水泵流量',s.flowRateMlSec??'',1,200,'0.1'),'填写用户水泵的实测流量'):field('自带水泵流量估值',`<strong>${e(state.settings.builtinFlowMlSec)} mL/s</strong>`,'来自知识库，需按样机实测核对')}
-  <div class="field-row vertical"><label for="waterSource">水源描述</label><textarea id="waterSource" name="waterSource" rows="2" maxlength="200" required placeholder="例如：阳台 20 L 储水桶">${e(s.waterSource)}</textarea></div>
   </div></section>
   <div id="form-error" class="form-error" role="alert">${e(state.formError || '')}</div>
   <div class="generate-action"><button class="button primary" type="submit" ${locked ? 'disabled' : ''}>${state.generating ? '正在匹配环境并生成…' : state.result ? '重新生成配置' : '分析并生成配置'}${icon('arrow',17)}</button><span class="caption muted">由后端生成 · 不保存用户配置历史</span></div>
