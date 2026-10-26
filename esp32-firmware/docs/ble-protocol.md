@@ -74,9 +74,13 @@ GATT 写响应不等于配置保存。配置发送结果未知时，重新连接
 
 设备的 sample 携带 bootCount、sampleSeq、sampledAt、lastSyncAt、timeQuality、通道 quality、温湿度、土壤/雨量 ADC、太阳能电压与需求值；无效数值为 null。quality.status 为 valid / suspect / invalid / stale / unconfigured，包含连续失败数、跳变数及最近有效采样时间。history / events 按游标和实际 UTF-8 大小分页，最大 24 条。status 同时返回 authorizationRole、lastSyncAt、calibrationReady、controlState、controlInhibition、间隔剩余秒数、prepareSummary 和 quickCheck。prepareSummary.channels 含逐通道有效/失败次数、均值、极值、最大单次变化及采样区间，baseline 保存各通道基准。偏离事件携带 referenceMin/referenceMax、observedSummary 和恢复值。
 
+sample 另提供不参与控制的原始诊断字段：rawTemperatureC、rawHumidityPct（DHT 直接读取失败时为 null）、rawSoilAdc、rawRainAdc、solarAdcMilliVolts。它们在未标定时仍可用于查看输入；网页将其与通过质量检查的采样值分开显示。
+
 syncTime 可请求 epochSeconds，或 sentAtEpochMs 与 estimatedOneWayMs；timeProbe 供网页测量一次 BLE 往返，设备返回 uptime 与时间可信状态。quickCheck 在 DISPLAY 开始三轮检查，可传 stimulatedSensorKey 并由操作人立即改变对应输入，以识别持续不变的通道。stop 关闭执行器并确认 stopped。独立 GATT 字节 ! 中断传输并返回 id=emergency-stop 的停止回执。密钥设备的双向认证、角色权限及消息封装见 prototype/docs/device-authentication.md。
 
 3.8.0 握手声明 `manual-control`。手动命令须完成认证，仅 owner / operator 可执行；在 DISPLAY 模式执行，舵机要求实测标定且不能与水泵同时运行。status 增加 `manualPumpOn` 与 `servoBusy`，网页据设备状态显示按钮。水泵开启最多 30 秒，超时、BLE 断开、模式切换及停止操作均关泵；设备拒绝缺失布尔值的开关命令。旧固件未声明此能力时网页禁用按钮。
+
+manualPump 的 pumpOn 与 status.manualPumpOn 是控制命令状态；设备没有水泵电流或出水反馈，网页不据此宣称实物已运行。
 
 二次确认令牌绑定当前会话与操作，30 秒内单次使用；错误令牌、重新握手和断线使其失效。DISPLAY 和 PREPARE 保持在线；LONGRUN 在运行前置就绪时接受，断开 BLE 后按采样与脉冲流程进入深睡。恢复出厂清除业务配置、标定和运行记录，保留身份；重启操作先发最终回执，再执行重启，回执丢失时重连核对。
 

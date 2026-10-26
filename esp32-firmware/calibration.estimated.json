@@ -1,0 +1,23 @@
+{
+  "verified": false,
+  "boardVersion": "10-01",
+  "measuredAt": "",
+  "measurementNotes": "估算草稿，未经过本机实测。土壤和雨量 ADC 是示例占位值；当前设备曾报告欠压，实测土壤 6、雨量 4，与这些估值不符。水泵流量为植物库建议值，舵机两个位置相同以避免未经验证的动作。不得作为已验证标定写入设备。",
+  "soilWet": 1000,
+  "soilDry": 3000,
+  "soilMin": 300,
+  "soilMax": 3800,
+  "rainMin": 300,
+  "rainMax": 3800,
+  "rainThreshold": 2000,
+  "rainWetBelow": true,
+  "allowAirFallback": false,
+  "flowMlSec": 22,
+  "solarDivider": 0.2,
+  "settleMs": 2000,
+  "dhtIntervalMs": 2000,
+  "dhtModel": 11,
+  "servoMoveMs": 500,
+  "servoParkUs": 1500,
+  "servoWipeUs": 1500
+}

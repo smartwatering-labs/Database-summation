@@ -78,6 +78,7 @@ translations.push(...[
   ['原始诊断读数；质量未通过时不用于浇水判断','Raw diagnostic readings; values that fail quality checks are not used for watering.'],
   ['温度直接读数','Direct temperature reading'],['空气湿度直接读数','Direct air humidity reading'],
   ['土壤原始 ADC','Raw soil ADC'],['雨量原始 ADC','Raw rain ADC'],['太阳能 ADC 电压','Solar ADC voltage'],
+  ['通过质量检查的 ADC 用于浇水判断；原始诊断读数仅用于排查和标定','Quality-checked ADC readings inform watering; raw diagnostic readings are for troubleshooting and calibration.'],
   ['当前固件未提供手动控制','This firmware does not support manual control'],
   ['设备未确认舵机动作','Device did not confirm servo movement'],
   ['设备未确认水泵状态','Device did not confirm the pump state'],

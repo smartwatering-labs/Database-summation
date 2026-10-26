@@ -84,7 +84,7 @@ export function devicePage(state, device) {
     ${data.quickCheck?`<p class="caption muted">快速检查：有效样本 ${e(data.quickCheck.validSamples??0)} / 3，剩余 ${e(data.quickCheck.remainingSamples??0)} 次${data.quickCheck.stimulatedSensorKey?` · 受刺激通道 ${e(channelNames[data.quickCheck.stimulatedSensorKey]||data.quickCheck.stimulatedSensorKey)}`:''}</p>`:''}
     <div class="section-heading"><h2>当前采样</h2><span class="caption muted">${sample ? `${e(timestamp(sample.sampledAt,sample.bootCount))}${sample.sampleSeq!=null?` · 采样序号 ${e(sample.sampleSeq)}`:''}${sample.sampledAt?` · 采样距今 ${e(age(sample.sampledAt))}`:''}` : '暂无采样'} · 页面可见时每 10 秒读取状态</span></div>
     ${sample ? `<div class="sensor-grid">${metric('空气温度',sample.temperatureC,'°C')}${metric('空气湿度',sample.humidityPct,'%')}${metric('土壤 ADC',sample.soilAdc)}${metric('雨量 ADC',sample.rainAdc)}${sample.solarVoltageV!==undefined?metric('太阳能输入',sample.solarVoltageV,'V'):''}${metric('浇水需求值',sample.wateringDemand,'/100')}</div>${rawSampleSection(sample)}${qualitySummary(sample)?notice(e(qualitySummary(sample)),'warning'):''}` : notice(configurationOnly ? '这版固件不采集传感器数据，当前采样和历史记录为空' : '设备尚未提供有效采样；等待下次采样后刷新')}
-    <p class="caption muted">ADC 为原始读数；土壤传感器尚需实测标定，不转换为未经标定的湿度百分比</p>
+    <p class="caption muted">通过质量检查的 ADC 用于浇水判断；原始诊断读数仅用于排查和标定</p>
     <section class="chart-section"><div class="section-heading"><h2>浇水需求趋势</h2><span class="legend"><i></i>本次连接的采样</span></div><canvas id="demand-chart" class="chart" role="img" aria-label="本次连接期间的浇水需求值趋势，当前数值见上方数据区"></canvas><p class="caption muted">本图仅保留当前页面的数据，不上传后端；阈值以设备实际配置为准</p></section>
     ${manualSection}
     ${eventSection}
