@@ -188,13 +188,13 @@ dialog[open].is-closing::backdrop{animation:quiet-backdrop-exit 150ms var(--moti
 @keyframes detail-backdrop-exit{from{opacity:1}to{opacity:0}}
 
 /* Keep mode selection and its compact apply action together. */
-@media(min-width:1200px){.device-dashboard{grid-template-columns:minmax(0,1fr) 384px}}
-.device-controls .field-row:has(#stimulated-sensor) .inline-control{flex:1 1 auto;min-width:0}
-.device-controls #stimulated-sensor{flex:1 1 150px;min-width:0;max-width:100%}
-.device-controls .field-row:has(#target-mode) .field-label{min-width:0;flex:0 0 auto}
-.device-controls .field-row:has(#target-mode) .inline-control{flex:1 1 auto;min-width:0;flex-wrap:nowrap}
-.device-controls #target-mode{flex:1 1 130px;width:130px;min-width:0}
-.device-controls .button[data-action="mode"]{flex:0 0 auto}
+@media(min-width:1200px){.device-dashboard{grid-template-columns:minmax(0,1fr) 360px}}
+.device-controls .device-check-note{margin:0;padding:14px 18px 18px;line-height:1.65}
+.device-controls .field-row:has(.inline-control){display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+.device-controls .field-row:has(.inline-control) .field-label{min-width:0}
+.device-controls .field-row:has(.inline-control) .inline-control{display:flex;width:100%;min-width:0;flex-wrap:nowrap}
+.device-controls .field-row:has(.inline-control) select{flex:1 1 auto;width:0;min-width:0;max-width:none}
+.device-controls .field-row:has(.inline-control) .button{flex:0 0 auto;white-space:nowrap}
 .device-controls :is(.button[data-action="device-download"],.device-hold){width:104px;min-width:104px;height:44px;min-height:44px;flex:0 0 104px;padding:5px 8px;text-align:center;white-space:normal;line-height:1.2}
 .workspace-panel .device-hold{position:relative;isolation:isolate;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;background:var(--error-bg)!important;color:var(--error)!important;border-color:transparent}
 .workspace-panel .device-hold.is-armed{animation:device-hold-arm 260ms cubic-bezier(.16,1,.3,1)}

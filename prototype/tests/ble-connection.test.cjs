@@ -59,17 +59,26 @@ const { chromium } = require('playwright');
           if (wasConnected) selected.dispatchEvent(new Event('gattserverdisconnected'));
         },
       };
-      Object.defineProperty(navigator, 'bluetooth', { configurable: true, value: { requestDevice: () => new Promise(resolve => { window.__selectDevice = () => resolve(selected); }) } });
+      Object.defineProperty(navigator, 'bluetooth', { configurable: true, value: { requestDevice: () => {
+        window.__pickerBeforeBusyRender = !!document.querySelector('.device-empty [data-action="connect"]');
+        return new Promise(resolve => { window.__selectDevice = () => resolve(selected); });
+      } } });
     });
-    const openDialog = async () => {
+    const openDialog = async (withCredential = false) => {
       await page.locator('.device-empty [data-action="connect"]').click();
+      if (withCredential) {
+        await page.locator('[name="credentialFile"]').setInputFiles({ name: 'device.json', mimeType: 'application/json',
+          buffer: Buffer.from(JSON.stringify({ deviceId: 'DEMO-WATER001', secret: 'ab'.repeat(32) })) });
+        await page.waitForFunction(() => !document.querySelector('#dialog-form button[type="submit"]').disabled);
+      }
       await page.getByRole('button', { name: '选择并连接设备', exact: true }).click();
       await page.getByRole('heading', { name: '等待选择设备', exact: true }).waitFor();
+      assert.equal(await page.evaluate(() => window.__pickerBeforeBusyRender), true, 'browser chooser is requested before rebuilding the device page');
       assert.equal(await page.locator('#sidebar-connection').textContent(), '等待选择设备');
       await page.evaluate(() => window.__selectDevice());
     };
-    const connect = async () => {
-      await openDialog();
+    const connect = async (withCredential = false) => {
+      await openDialog(withCredential);
       await page.locator('.device-identity').waitFor({ timeout: 30000 });
       assert.ok(await page.locator('.manual-control').isVisible());
       assert.ok(await page.locator('[data-action="manual-pump"]').isEnabled());
@@ -82,7 +91,7 @@ const { chromium } = require('playwright');
     const counters = () => page.evaluate(() => ({ connects: window.__gattConnects, disconnects: window.__gattDisconnects }));
 
     // A GATT disconnect during discovery retries and connects again.
-    await connect();
+    await connect(true);
     assert.equal((await counters()).connects, 2);
     await disconnect();
 

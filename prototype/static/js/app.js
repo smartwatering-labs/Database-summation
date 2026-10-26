@@ -290,17 +290,28 @@ function connectionDialog() {
   if(device.busy)return toast('请等待当前设备操作完成');
   closeMenu();
   const ble=state.settings.ble;
+  let selectedCredential=null;
   openDialog('连接浇水设备',`<p class="dialog-description">请按外置按钮唤醒 ESP32-C3，并打开电脑或手机蓝牙；浏览器会让你选择设备</p>
   <div class="notice">连接设置与导入凭据仅在当前标签页会话内保留，供刷新后恢复连接；生成的配置仍在刷新后清除</div>
   ${['serviceUuid','writeUuid','notifyUuid'].map((key,i)=>`<label class="dialog-field">${['BLE 服务 UUID','写入特征 UUID','通知特征 UUID'][i]}<input name="${key}" value="${e(ble[key]||'')}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"></label>`).join('')}
   <label class="dialog-field">设备密钥凭据（已供应密钥的设备需导入）<input type="file" name="credentialFile" accept=".json,application/json"></label>
   ${ble.credential?`<p class="caption muted">本页已载入 ${e(ble.credential.deviceId)} 的凭据；当前标签页刷新后可恢复。</p>`:''}
   <p class="caption muted">SWS-BLE 1.0 · JSON 分包传输；页面不支持远程唤醒设备</p>${device.state==='ready'?button('断开当前连接','disconnect',{type:'outline',extra:'type="button"'}):''}`,async form=>{
-    const data=new FormData(form),file=data.get('credentialFile');
-    if(file?.size){if(file.size>4096)throw new Error('设备凭据文件超过 4 KB');state.settings.ble.credential=validateCredential(JSON.parse(await file.text()));}
+    const data=new FormData(form),file=form.elements.credentialFile.files[0];
+    if(file){if(selectedCredential?.file!==file)throw new Error('请等待设备凭据读取完成');state.settings.ble.credential=selectedCredential.value;}
     for(const key of ['serviceUuid','writeUuid','notifyUuid'])state.settings.ble[key]=data.get(key);
     dialog.close(); resetDeviceView(); await device.connect(state.settings.ble,false,{remember:true}); toast('设备连接与握手成功');render();
   },'选择并连接设备');
+  const fileInput=dialog.querySelector('[name="credentialFile"]'),submit=dialog.querySelector('#dialog-form button[type="submit"]'),error=dialog.querySelector('#dialog-error');
+  fileInput.addEventListener('change',async()=>{
+    const file=fileInput.files[0];selectedCredential=null;error.textContent='';submit.disabled=!!file;
+    if(!file)return;
+    try{
+      if(file.size>4096)throw new Error('设备凭据文件超过 4 KB');
+      const credential=validateCredential(JSON.parse(await file.text()));
+      if(fileInput.files[0]===file){selectedCredential={file,value:credential};submit.disabled=false;}
+    }catch(readError){if(fileInput.files[0]===file)error.textContent=readError.message;}
+  });
 }
 function resetDeviceView(){if(state.scene.deviceObservation){state.scene.deviceObservation=null;state.dirty=!!state.result;}state.historyOpen=false;state.historyPage=0;state.eventsOpen=false;state.eventsPage=0;state.eventsLoading=false;state.deviceError='';state.writeResult=device.pendingWrite?'unknown':null;pollFailures=0;}
 

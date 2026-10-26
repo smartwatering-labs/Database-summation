@@ -18,11 +18,12 @@ export class DeviceController extends EventTarget {
   async connect(settings, demo = false, options = {}) {
     if (this.busy||this.stopping) throw new Error('请等待当前设备操作完成');
     if (!options.rememberedDeviceId || demo) clearConnectionSession();
-    this.disconnect(); this.demo = demo; this.state = 'connecting'; this.connectionPhase = demo?'connecting':options.rememberedDeviceId?'restoring':'choosing'; this.busy = true; this.stage = null; this.error = ''; this.emit();
+    this.disconnect('', { silent: true }); this.demo = demo; this.state = 'connecting'; this.connectionPhase = demo?'connecting':options.rememberedDeviceId?'restoring':'choosing'; this.busy = true; this.stage = null; this.error = '';
     const generation = this.generation;
+    const choosing = !demo && !options.rememberedDeviceId;
     const onDisconnect = () => { if (generation === this.generation) this.disconnect('设备休眠或连接断开，请按外置按钮唤醒后重连'); };
     const onProgress = stage => { if (generation === this.generation) { this.stage = stage; this.emit(); } };
-    const onConnectionPhase = phase => { if (generation === this.generation) { this.connectionPhase = phase; this.emit(); } };
+    const onConnectionPhase = phase => { if (generation === this.generation) { this.connectionPhase = phase; if (phase !== 'choosing') this.emit(); } };
     const transport = demo ? new DemoTransport(onDisconnect, onProgress) : new BleTransport(settings, onDisconnect, onProgress, onConnectionPhase);
     if (demo) {
       if (this.simulator) {
@@ -36,7 +37,11 @@ export class DeviceController extends EventTarget {
     this.credential=settings.credential||null;
     const session = { generation, transport, expectedDeviceId: options.expectedDeviceId };
     try {
-      await transport.connect(options.rememberedDeviceId); this.assertSession(session); this.state = 'handshaking'; this.connectionPhase = 'handshake'; this.emit();
+      // Request the native chooser in the click task before the device page is rebuilt.
+      const opening = transport.connect(options.rememberedDeviceId);
+      if (choosing) setTimeout(() => { if (this.isSession(session) && this.state === 'connecting') this.emit(); }, 0);
+      else this.emit();
+      await opening; this.assertSession(session); this.state = 'handshaking'; this.connectionPhase = 'handshake'; this.emit();
       await this.authenticate(session);
       this.connectionPhase = 'status'; this.emit();
       this.status = validateStatus(await this.request(session, 'status'), this.handshake.deviceId);
@@ -283,11 +288,11 @@ export class DeviceController extends EventTarget {
       return result;
     });
   }
-  disconnect(message = '', { forget = false } = {}) {
+  disconnect(message = '', { forget = false, silent = false } = {}) {
     if (forget) clearConnectionSession();
     this.connectionPhase = null; this.connectionFailurePhase = null;
     if (this.status && this.lastRead) this.lastSnapshot = { status: this.status, readAt: this.lastRead, demo: this.demo };
     this.generation++; this.refreshing = false; this.transport?.disconnect(); this.transport = null; this.handshake = null;
-    this.state = 'disconnected'; this.status = null; this.history = []; this.events = []; this.trend = []; this.lastSampleKey = null; this.busy = false;this.stopping=false; this.stage = this.pendingWrite ? 'unknown' : this.stage === 'saved' ? 'saved' : null; this.error = message; this.demo = false; this.emit();
+    this.state = 'disconnected'; this.status = null; this.history = []; this.events = []; this.trend = []; this.lastSampleKey = null; this.busy = false;this.stopping=false; this.stage = this.pendingWrite ? 'unknown' : this.stage === 'saved' ? 'saved' : null; this.error = message; this.demo = false; if (!silent) this.emit();
   }
 }

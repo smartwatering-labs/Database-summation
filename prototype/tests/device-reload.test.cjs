@@ -104,15 +104,22 @@ const stats = page => page.evaluate(() => JSON.parse(sessionStorage.getItem('ble
             const bounds = item.getBoundingClientRect();
             return bounds.left < rect.left - 1 || bounds.right > rect.right + 1;
           }).map(item => item.id || item.dataset.action || item.className);
+          const pairs = ['stimulated-sensor', 'target-mode'].map(id => {
+            const select = node.querySelector('#' + id), action = select.closest('.inline-control').querySelector('button');
+            const option = select.getBoundingClientRect(), button = action.getBoundingClientRect();
+            return { id, centerOffset: Math.abs((option.top + option.bottom - button.top - button.bottom) / 2), gap: button.left - option.right };
+          });
           return { viewport:innerWidth, width:rect.width, left:rect.left, right:rect.right, overflow,
-            documentOverflow:document.documentElement.scrollWidth > innerWidth,
+            pairs, documentOverflow:document.documentElement.scrollWidth > innerWidth,
             columns:getComputedStyle(node.parentElement).gridTemplateColumns };
         });
         metrics.push({language, ...metric});
         assert.equal(metric.documentOverflow, false, `${language} ${width}: page overflow`);
         assert.deepEqual(metric.overflow, [], `${language} ${width}: control overflow`);
+        for (const pair of metric.pairs) assert.ok(pair.centerOffset < 1 && pair.gap >= 0,
+          `${language} ${width}: ${pair.id} option and action remain on one line ${JSON.stringify(pair)}`);
         if (width >= 1200) {
-          assert.ok(Math.abs(metric.width - 384) < 1, `${language} ${width}: wider controls`);
+          assert.ok(Math.abs(metric.width - 360) < 1, `${language} ${width}: compact controls`);
           assert.ok(Math.abs(metric.right - (width - 80)) < 1, `${language} ${width}: right edge is unchanged`);
         } else assert.equal(metric.columns.split(' ').length, 1, `${language} ${width}: single-column controls`);
         if (width === 1440 || width === 390) await page.screenshot({path:path.join(output, `after-${language}-${width}.png`)});

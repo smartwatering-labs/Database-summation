@@ -19,9 +19,13 @@
 constexpr char SWS_SERVICE_UUID[] = "2d26a7cc-1d45-4eae-9280-2a97346fd001";
 constexpr char SWS_WRITE_UUID[] = "2d26a7cc-1d45-4eae-9280-2a97346fd002";
 constexpr char SWS_NOTIFY_UUID[] = "2d26a7cc-1d45-4eae-9280-2a97346fd003";
-constexpr uint8_t SWS_SENSOR_POWER_PIN=0,SWS_SOLAR_PIN=1,SWS_SERVO_PIN=2;
-constexpr uint8_t SWS_RAIN_PIN=3,SWS_SOIL_PIN=4,SWS_PUMP_PIN=7,SWS_DHT_PIN=10;
-constexpr uint8_t SWS_PUMP_ON_LEVEL=LOW,SWS_PUMP_OFF_LEVEL=HIGH;
+// This unit's SIGS1<->SIGS2 cable is reversed: GPIO2 reaches the pump gate
+// (Q7/R1/R17) and GPIO7 reaches SERVO1. The two outputs are swapped below so
+// the web/OLED pump and servo commands reach the correct device. If the cable
+// is corrected to pin1-pin1, restore PUMP=7 and SERVO=2.
+constexpr uint8_t SWS_SENSOR_POWER_PIN=0,SWS_SOLAR_PIN=1,SWS_SERVO_PIN=7;
+constexpr uint8_t SWS_RAIN_PIN=3,SWS_SOIL_PIN=4,SWS_PUMP_PIN=2,SWS_DHT_PIN=10;
+constexpr uint8_t SWS_PUMP_ON_LEVEL=HIGH,SWS_PUMP_OFF_LEVEL=LOW;
 // Set this only after the assembled board has a verified active-low wake button.
 // The 10-01 pin list assigns no such button; timer wake remains available.
 #ifndef SWS_WAKE_PIN
