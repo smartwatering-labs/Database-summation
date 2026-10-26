@@ -1,6 +1,7 @@
 export function escape(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char])); }
-export const modes = { DISPLAY: '展示 / 调试', PREPARE: '准备 / 校准', LONGRUN: '长期运行' };
+export const modes = { DISPLAY: '展示 / 调试', PREPARE: '准备 / 采样', LONGRUN: '长期运行' };
 export const connectionPhases = {
+  restoring: ['正在恢复蓝牙连接', '正在查找本标签页上次连接且仍获授权的设备'],
   choosing: ['等待选择设备', '请在浏览器弹窗中点选 SWS-ESP32C3，再点击“配对”；显示“已配对”时也需要选中并确认'],
   connecting: ['正在建立蓝牙连接', '已选择设备，正在建立连接，请保持设备供电'],
   waiting: ['等待蓝牙连接完成', '系统里还有一次蓝牙请求没有结算完，网页会自动等待并继续；一直不完成时请在系统蓝牙设置中删除该设备的配对记录'],

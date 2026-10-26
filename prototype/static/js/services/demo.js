@@ -23,7 +23,7 @@ export class DemoTransport {
     if (!this.connected) throw new Error('模拟设备已断开');
     if (action === 'handshake') {
       this.nonce = crypto.randomUUID(); this.authenticated = false;
-      return { protocol: PROTOCOL, protocolVersion: VERSION, deviceId: 'DEMO-WATER001', model: 'ESP32-C3', fwVersion: '3.8.0', nonce: this.nonce,
+      return { protocol: PROTOCOL, protocolVersion: VERSION, deviceId: 'DEMO-WATER001', model: 'ESP32-C3', fwVersion: '3.9.0', nonce: this.nonce,
         maxConfigVersion: '2.0', capabilities: ['status', 'history', 'configuration', 'confirmed-operations', 'minimum-interval', 'target-bound-config', 'sample-quality', 'events', 'manual-control'] };
     }
     if (action === 'authenticate') {
@@ -34,9 +34,9 @@ export class DemoTransport {
     if (this.manualPumpOn && Date.now() >= this.manualPumpUntil) this.manualPumpOn = false;
     if (action === 'status') {
       this.tick++;
-      return { protocol: PROTOCOL, protocolVersion: VERSION, deviceId: 'DEMO-WATER001', fwVersion: '3.8.0', mode: this.mode,
+      return { protocol: PROTOCOL, protocolVersion: VERSION, deviceId: 'DEMO-WATER001', fwVersion: '3.9.0', mode: this.mode,
         plant: this.config?.plant || '尚未配置', configRevision: this.revision, configured: !!this.config,
-        manualPumpOn: this.manualPumpOn, servoBusy: Date.now() < this.servoBusyUntil, calibrationReady: true,
+        manualPumpOn: this.manualPumpOn, servoBusy: Date.now() < this.servoBusyUntil,
         sample: { temperatureC: +(26.5 + Math.sin(this.tick / 4)).toFixed(1), humidityPct: 58, soilAdc: 12, rainAdc: 2400, solarVoltageV: 5.1,
           wateringDemand: +(42 + Math.sin(this.tick / 3) * 6).toFixed(1), sampledAt: Math.floor(Date.now() / 1000), bootCount:1,sampleSeq:this.tick,timeQuality:'trusted',
           quality:{temperatureC:{status:'valid'},humidityPct:{status:'valid'},soilAdc:{status:'valid'},rainAdc:{status:'valid'},solarVoltageV:{status:'valid'}} } };

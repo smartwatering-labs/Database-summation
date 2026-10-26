@@ -88,7 +88,7 @@ public:
       // Back to the development profile: no owner key means no link encryption and no
       // pairing at all. Every peer key goes too, including a half-written record the
       // BLE API refuses to delete, so nothing stale can shadow the next connection.
-      // Configuration, calibration and the history logs stay untouched.
+      // Configuration and the history logs stay untouched.
       bool cleared=identity.remove("key");
       if(cleared)key.clear();
       NimBLEDevice::deleteAllBonds();
@@ -262,7 +262,9 @@ class WriteCallbacks : public NimBLECharacteristicCallbacks {
 ServerCallbacks serverCallbacks;NotifyCallbacks notifyCallbacks;WriteCallbacks writeCallbacks;
 
 void setup(){
-  digitalWrite(SWS_PUMP_PIN,LOW);pinMode(SWS_PUMP_PIN,OUTPUT);
+  // Arduino digitalWrite ignores pins that have not yet been configured as GPIO.
+  gpio_set_level(gpio_num_t(SWS_PUMP_PIN),SWS_PUMP_OFF_LEVEL);pinMode(SWS_PUMP_PIN,OUTPUT);
+  digitalWrite(SWS_PUMP_PIN,SWS_PUMP_OFF_LEVEL);
   digitalWrite(SWS_SENSOR_POWER_PIN,LOW);pinMode(SWS_SENSOR_POWER_PIN,OUTPUT);
   Serial.begin(115200);hardware.begin();
   char id[24];uint64_t mac=ESP.getEfuseMac();snprintf(id,sizeof(id),"C3-%04x%08lx",uint16_t(mac>>32),static_cast<unsigned long>(mac&0xffffffff));

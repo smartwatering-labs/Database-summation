@@ -193,7 +193,7 @@ async def run(args, report):
         report['eventRecords'] = len(events.get('records', []))
         report['historyRecords'] = len(history.get('records', []))
         report['status'] = {key: final_status.get(key) for key in ('configRevision', 'mode',
-            'logStorageReady', 'calibrationReady', 'timeQuality', 'controlState', 'controlInhibition')}
+            'logStorageReady', 'timeQuality', 'controlState', 'controlInhibition')}
         report['passed'] = True
 
 

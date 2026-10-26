@@ -1,7 +1,8 @@
-const CACHE='watering-offline-kit-v3';
+const CACHE='watering-offline-kit-v5';
 const FILES=['/offline-kit','/static/offline-kit.js','/static/offline-kit.css',
   '/static/js/services/device.js','/static/js/services/ble.js','/static/js/services/demo.js',
-  '/static/js/services/protocol.js','/static/js/services/config-file.js','/static/js/services/api.js'];
+  '/static/js/services/protocol.js','/static/js/services/config-file.js','/static/js/services/api.js',
+  '/static/js/services/connection-session.js'];
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES)).then(()=>self.skipWaiting()));
 });

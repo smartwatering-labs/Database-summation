@@ -8,6 +8,7 @@ import { surfaceMotion } from './surface-motion.js';
 import './interaction-motion.js';
 import './theme.js';
 import { DeviceController } from './services/device.js';
+import { readConnectionSession } from './services/connection-session.js';
 import { home } from './pages/home.js';
 import { product } from './pages/product.js';
 import { configure, connectivityPanel, resultPanel, countryMatches, countryOptions } from './pages/configure.js';
@@ -290,15 +291,15 @@ function connectionDialog() {
   closeMenu();
   const ble=state.settings.ble;
   openDialog('连接浇水设备',`<p class="dialog-description">请按外置按钮唤醒 ESP32-C3，并打开电脑或手机蓝牙；浏览器会让你选择设备</p>
-  <div class="notice">默认值对应随项目提供的 ESP32-C3 BLE 验证固件；以下设置只在当前页面生效，量产固件可在部署环境中覆盖</div>
+  <div class="notice">连接设置与导入凭据仅在当前标签页会话内保留，供刷新后恢复连接；生成的配置仍在刷新后清除</div>
   ${['serviceUuid','writeUuid','notifyUuid'].map((key,i)=>`<label class="dialog-field">${['BLE 服务 UUID','写入特征 UUID','通知特征 UUID'][i]}<input name="${key}" value="${e(ble[key]||'')}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"></label>`).join('')}
   <label class="dialog-field">设备密钥凭据（已供应密钥的设备需导入）<input type="file" name="credentialFile" accept=".json,application/json"></label>
-  ${ble.credential?`<p class="caption muted">本页已载入 ${e(ble.credential.deviceId)} 的凭据；刷新页面后清除。</p>`:''}
+  ${ble.credential?`<p class="caption muted">本页已载入 ${e(ble.credential.deviceId)} 的凭据；当前标签页刷新后可恢复。</p>`:''}
   <p class="caption muted">SWS-BLE 1.0 · JSON 分包传输；页面不支持远程唤醒设备</p>${device.state==='ready'?button('断开当前连接','disconnect',{type:'outline',extra:'type="button"'}):''}`,async form=>{
     const data=new FormData(form),file=data.get('credentialFile');
     if(file?.size){if(file.size>4096)throw new Error('设备凭据文件超过 4 KB');state.settings.ble.credential=validateCredential(JSON.parse(await file.text()));}
     for(const key of ['serviceUuid','writeUuid','notifyUuid'])state.settings.ble[key]=data.get(key);
-    dialog.close(); resetDeviceView(); await device.connect(state.settings.ble); toast('设备连接与握手成功');render();
+    dialog.close(); resetDeviceView(); await device.connect(state.settings.ble,false,{remember:true}); toast('设备连接与握手成功');render();
   },'选择并连接设备');
 }
 function resetDeviceView(){if(state.scene.deviceObservation){state.scene.deviceObservation=null;state.dirty=!!state.result;}state.historyOpen=false;state.historyPage=0;state.eventsOpen=false;state.eventsPage=0;state.eventsLoading=false;state.deviceError='';state.writeResult=device.pendingWrite?'unknown':null;pollFailures=0;}
@@ -398,7 +399,7 @@ const actions={
   connect:connectionDialog,
   'close-dialog':()=>dialog.close(),
   demo:async()=>{if(!state.settings.demoEnabled)throw new Error('模拟设备未启用');resetDeviceView();await device.connect({},true);toast('模拟设备已连接，所有读数均为演示数据');render();},
-  disconnect:()=>{device.disconnect();resetDeviceView();dialog.close();render();toast('设备已断开');},
+  disconnect:()=>{device.disconnect('',{forget:true});resetDeviceView();dialog.close();render();toast('设备已断开');},
   refresh:async()=>{await device.refresh();state.deviceError='';pollFailures=0;render();toast('已读取最新设备状态');},
   'sync-time':async()=>{await device.syncTime();render();toast('设备已确认校时，最短间隔继续按经过时间计算');},
   'quick-check':async()=>{
@@ -502,6 +503,11 @@ async function initialize() {
   try{
     const [settings,plants]=await Promise.all(['/api/settings','/api/plants'].map(path=>api(path)));
     Object.assign(state,{settings,plants,ready:true,backendReachable:true,backendCheckedAt:Date.now()});navigate();
+    const saved = readConnectionSession();
+    if (saved) {
+      Object.assign(state.settings.ble, saved.settings, { credential: saved.credential });
+      void device.connect(state.settings.ble, false, { remember:true, rememberedDeviceId: saved.browserDeviceId, expectedDeviceId: saved.deviceId }).catch(() => {});
+    }
   }catch(error){main.innerHTML=`<section class="empty-state"><h1>工作区暂时无法加载</h1><p>${e(error.message)}</p>${button('重新加载','retry',{type:'primary'})}</section>`;}
 }
 initialize();

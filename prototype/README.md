@@ -56,6 +56,8 @@ Linux / macOS 在 `prototype` 中使用 `python3 -m pip install -r requirements.
 
 用户配置只保存在页面内存中：不使用 localStorage、sessionStorage、IndexedDB、Cookie 或 Service Worker 缓存配置。刷新、关闭页面会清除；导出文件是用户主动保存的副本。后端只持久化知识库和系统维护日志，不创建用户／设备／会话／配置历史表。
 
+蓝牙连接恢复单独使用当前标签页的 sessionStorage，记录上次成功连接的设备 ID、通信 UUID 和用户已导入的对应凭据；不保存业务配置或认证会话。刷新后，在浏览器提供 `getDevices()` 且授权仍有效时自动恢复该设备并重新握手。主动断开或切换到模拟设备会清除恢复记录。接口不可用或设备不可达时保留手动连接入口。Edge 可在 `edge://flags/#enable-experimental-web-platform-features` 启用 Experimental Web Platform features 后重启浏览器；该选项的开放情况由浏览器版本决定。
+
 知识库初始条目属于**工程建议**；管理员可记录来源审核与实物验证，已审核参考范围才用于生成页的区域天气适配提示。泵流量 22 mL/s 来自项目资料，需实测；续航展示的是**水箱续航**，不包含电池。预计季节间隔用于水量估算；2.0 配置中的 `minWaterIntervalSeconds` 由固件执行，仍需在整机上验证断电和提前唤醒场景。首次配置推荐 PREPARE。10-01 样板的 MOS 驱动、ADC 标定和固件参数边界仍需实物确认。
 
 用户页面使用现有完整 `watering-box-9-30ver.glb`：首页合拢三分之四视角、产品介绍四层爆炸视图、配置页移除顶盖正俯视、设备页移除外壳查看双层主板。外壳使用微暖白半哑光 ABS，PCB、金属触点、丝印和封装材质分别配置；三盏面光源、程序生成的摄影棚环境及 VSM 地面阴影共同呈现体积和接触关系。首页/介绍页用开放式说明列表打开详情，配置/设备页使用可滚动的常驻玻璃面板。侧栏默认展开，可平滑收起。切页先隐藏文字，模型直接过渡至最新目标后再渐显文字。模型、Three.js 和加载器均从本地 Flask 静态目录读取，不使用 CDN，不需要 Node 构建。模型加载期间显示文字状态；模型或 WebGL 不可用时显示重试说明，业务操作仍可使用。正式模型替换与测试说明见 [3D 展示说明](docs/model-presentation.md)；2026-10-12 产品摄影优化与验证见 [交付记录](docs/product-polish-2026-10-12.md)。

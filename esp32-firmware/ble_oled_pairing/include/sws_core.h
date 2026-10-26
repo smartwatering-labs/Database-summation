@@ -15,7 +15,7 @@ constexpr size_t MAX_MESSAGE=8192, MAX_CONFIG=6144, FRAME_BYTES=120, MAX_PARTS=7
 constexpr uint32_t FRAME_TIMEOUT=20000, NONCE_TIMEOUT=30000, OP_TIMEOUT=30000;
 constexpr const char* PROTOCOL="SWS-BLE";
 constexpr const char* VERSION="1.0";
-constexpr const char* FW_VERSION="3.8.0";
+constexpr const char* FW_VERSION="3.9.0";
 inline std::string json(JsonVariantConst value) {std::string out;serializeJson(value,out);return out;}
 inline uint32_t crc32(const std::string& bytes) {
   uint32_t crc=0xffffffff;
@@ -288,7 +288,7 @@ public:
     if(action=="prepareOperation"){
       operation=p["operation"]|"";targetMode=p["mode"]|"";opToken.clear();
       if(operation!="mode"&&operation!="restart"&&operation!="factoryReset"){error(id,"未知设备操作");return;}
-      if(operation=="mode"&&!hw.modeAllowed(targetMode)){error(id,"自动浇水模式需要有效标定、2.0 配置、日志存储和可信时间");return;}
+      if(operation=="mode"&&!hw.modeAllowed(targetMode)){error(id,"自动浇水模式需要 2.0 配置、日志存储和可信时间");return;}
       opToken=hw.randomToken();opAt=hw.now();out["confirmationToken"]=opToken;out["expiresInSeconds"]=30;respond(id,"ok",out);return;
     }
     if(action=="confirmOperation"){

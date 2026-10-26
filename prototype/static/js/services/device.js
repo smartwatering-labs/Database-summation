@@ -1,6 +1,7 @@
 import { BleTransport } from './ble.js';
 import { DemoTransport } from './demo.js';
 import { handshakeAuthentication, validateHandshake, validateStatus, validateHistory, validateEventPage } from './protocol.js';
+import { rememberConnection, clearConnectionSession } from './connection-session.js';
 
 function sameJson(left, right) {
   if (left === right) return true;
@@ -14,9 +15,10 @@ function sameJson(left, right) {
 export class DeviceController extends EventTarget {
   constructor() { super(); this.state = 'disconnected'; this.demo = false; this.status = null; this.history = []; this.events = []; this.trend = []; this.busy = false; this.generation = 0; this.pendingWrite = null; this.lastSnapshot = null; this.lastRead = null; this.lastSampleKey = null; }
   emit() { this.dispatchEvent(new Event('change')); }
-  async connect(settings, demo = false) {
+  async connect(settings, demo = false, options = {}) {
     if (this.busy||this.stopping) throw new Error('请等待当前设备操作完成');
-    this.disconnect(); this.demo = demo; this.state = 'connecting'; this.connectionPhase = demo?'connecting':'choosing'; this.busy = true; this.stage = null; this.error = ''; this.emit();
+    if (!options.rememberedDeviceId || demo) clearConnectionSession();
+    this.disconnect(); this.demo = demo; this.state = 'connecting'; this.connectionPhase = demo?'connecting':options.rememberedDeviceId?'restoring':'choosing'; this.busy = true; this.stage = null; this.error = ''; this.emit();
     const generation = this.generation;
     const onDisconnect = () => { if (generation === this.generation) this.disconnect('设备休眠或连接断开，请按外置按钮唤醒后重连'); };
     const onProgress = stage => { if (generation === this.generation) { this.stage = stage; this.emit(); } };
@@ -32,13 +34,15 @@ export class DeviceController extends EventTarget {
     }
     this.transport = transport;
     this.credential=settings.credential||null;
-    const session = { generation, transport };
+    const session = { generation, transport, expectedDeviceId: options.expectedDeviceId };
     try {
-      await transport.connect(); this.assertSession(session); this.state = 'handshaking'; this.connectionPhase = 'handshake'; this.emit();
+      await transport.connect(options.rememberedDeviceId); this.assertSession(session); this.state = 'handshaking'; this.connectionPhase = 'handshake'; this.emit();
       await this.authenticate(session);
       this.connectionPhase = 'status'; this.emit();
       this.status = validateStatus(await this.request(session, 'status'), this.handshake.deviceId);
       this.state = 'ready'; this.lastRead = Date.now(); this.lastSnapshot = null; this.record();
+      if (!demo && options.remember && transport.device?.id) rememberConnection({ browserDeviceId: transport.device.id, deviceId: this.status.deviceId, settings,
+        credential: this.credential?.deviceId === this.status.deviceId ? this.credential : null });
     } catch (error) {
       transport.disconnect();
       if (this.isSession(session)) { this.connectionFailurePhase = this.connectionPhase; this.state = 'error'; this.status = null; this.error = this.friendly(error); }
@@ -63,6 +67,7 @@ export class DeviceController extends EventTarget {
   }
   async authenticate(session = { generation: this.generation, transport: this.transport }) {
     const h = validateHandshake(await this.request(session, 'handshake'));
+    if (session.expectedDeviceId && h.deviceId !== session.expectedDeviceId) throw new Error('恢复连接时设备身份不匹配，请重新选择设备');
     session.transport.configureLimits?.(h.transport);
     if (this.handshake && this.handshake.deviceId !== h.deviceId) throw new Error('握手设备身份发生变化，请重新连接');
     const authentication=await handshakeAuthentication(h,this.credential);
@@ -88,14 +93,14 @@ export class DeviceController extends EventTarget {
     this.ensureReady();
     const s=this.status.prepareSummary;
     if(this.demo)throw new Error('实测辅助生成需要连接真实设备');
-    if(!this.handshake.capabilities?.includes('prepare-summary')||this.status.calibrationReady!==true||s?.complete!==true
-      ||this.status.timeQuality!=='trusted')throw new Error('请先完成设备标定、校时与十分钟准备期');
+    if(!this.handshake.capabilities?.includes('prepare-summary')||s?.complete!==true
+      ||this.status.timeQuality!=='trusted')throw new Error('请先完成设备校时与十分钟准备期');
     if(!Number.isInteger(s.validSamples)||s.validSamples<10||!Number.isInteger(s.totalSamples)
       ||s.totalSamples<s.validSamples||s.validSamples/s.totalSamples<.8||!Number.isInteger(s.durationSeconds)||s.durationSeconds<600||s.durationSeconds>86400
       ||s.configRevision!==this.status.configRevision||!Number.isFinite(s.temperatureC)||!Number.isFinite(s.humidityPct)
-      ||s.temperatureC<-20||s.temperatureC>60||s.humidityPct<0||s.humidityPct>100||!Number.isFinite(s.flowRateMlSec)||s.flowRateMlSec<1||s.flowRateMlSec>200
+      ||s.temperatureC<-20||s.temperatureC>60||s.humidityPct<0||s.humidityPct>100
       ||!Number.isInteger(s.finishedAt)||Date.now()/1000-s.finishedAt>3600||Date.now()/1000-s.finishedAt<-300)throw new Error('设备准备期摘要缺少有效或新鲜的数据，请重新准备');
-    return {...s,deviceId:this.status.deviceId,calibrationReady:true,timeQuality:'trusted'};
+    return {...s,deviceId:this.status.deviceId,timeQuality:'trusted'};
   }
   async lock(operation) {
     this.ensureReady(); if (this.busy||this.stopping) throw new Error('设备正在处理其他操作');
@@ -278,7 +283,8 @@ export class DeviceController extends EventTarget {
       return result;
     });
   }
-  disconnect(message = '') {
+  disconnect(message = '', { forget = false } = {}) {
+    if (forget) clearConnectionSession();
     this.connectionPhase = null; this.connectionFailurePhase = null;
     if (this.status && this.lastRead) this.lastSnapshot = { status: this.status, readAt: this.lastRead, demo: this.demo };
     this.generation++; this.refreshing = false; this.transport?.disconnect(); this.transport = null; this.handshake = null;

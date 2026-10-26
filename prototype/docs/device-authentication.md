@@ -2,7 +2,9 @@
 
 2026-10-15。浏览器与离线入口按握手能力采用同一认证实现。
 
-development 沿用公开开发摘要。hmac-sha256-v1 使用通过 USB 供应的 32 字节设备密钥。所有者凭据为 deviceId 和 64 位十六进制 secret，由用户主动导入当前页面内存。
+development 沿用公开开发摘要。hmac-sha256-v1 使用通过 USB 供应的 32 字节设备密钥。所有者凭据为 deviceId 和 64 位十六进制 secret，由用户主动导入。主页面成功连接后，仅在当前标签页 sessionStorage 内保存设备标识、通信 UUID 和对应凭据，用于刷新后恢复连接；主动断开时删除恢复记录。配置 JSON、握手 nonce 与消息序号不进入恢复记录，后端不接收凭据。
+
+刷新会结束原 GATT 会话。浏览器提供 `navigator.bluetooth.getDevices()` 且仍保留设备授权时，页面只恢复记录中那台设备，并重新发现服务、订阅通知、校验设备身份、认证和读取状态。不支持该接口、授权已撤销或恢复失败时显示原因，保留手动连接入口；恢复流程不自动打开设备选择器。当前 Edge 的默认设置未开放该接口，独立测试进程启用 Experimental Web Platform features 后可用；真实设备的刷新恢复仍需在启用该接口的浏览器中验收。
 
 握手先验证 HMAC-SHA256(key, device|deviceId|nonce) 设备证明，再提交 client|deviceId|nonce 客户端证明。operator 与 viewer 使用各自密钥和 client|role|deviceId|nonce 证明；握手中的 deviceProofs 按角色返回设备证明。后续请求使用 action=secured，payload 包含递增 sequence、原业务 JSON UTF-8 的 Base64 body 和 mac。请求签名覆盖 request|deviceId|nonce|sequence|body，回复使用 response 前缀。回复外层 status=secured，解封装后沿用现有进度、保存回执和二次确认接口。
 

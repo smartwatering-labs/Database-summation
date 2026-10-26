@@ -152,7 +152,6 @@ export function validateStatus(value, deviceId) {
         if (!['temperatureC', 'humidityPct', 'soilAdc', 'rainAdc', 'solarVoltageV'].includes(key)
           || !item || typeof item !== 'object' || !['valid', 'suspect', 'stale', 'invalid', 'unconfigured', 'missing'].includes(item.status)
           || (item.reason != null && (typeof item.reason !== 'string' || item.reason.length > 80))) throw new Error('通道质量格式无效');
-        if (['suspect', 'invalid', 'unconfigured', 'missing'].includes(item.status) && s[key] != null) throw new Error('无效通道不能携带有效读数：' + key);
       }
     }
   }

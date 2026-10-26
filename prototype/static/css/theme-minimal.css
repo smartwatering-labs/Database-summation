@@ -188,6 +188,9 @@ dialog[open].is-closing::backdrop{animation:quiet-backdrop-exit 150ms var(--moti
 @keyframes detail-backdrop-exit{from{opacity:1}to{opacity:0}}
 
 /* Keep mode selection and its compact apply action together. */
+@media(min-width:1200px){.device-dashboard{grid-template-columns:minmax(0,1fr) 384px}}
+.device-controls .field-row:has(#stimulated-sensor) .inline-control{flex:1 1 auto;min-width:0}
+.device-controls #stimulated-sensor{flex:1 1 150px;min-width:0;max-width:100%}
 .device-controls .field-row:has(#target-mode) .field-label{min-width:0;flex:0 0 auto}
 .device-controls .field-row:has(#target-mode) .inline-control{flex:1 1 auto;min-width:0;flex-wrap:nowrap}
 .device-controls #target-mode{flex:1 1 130px;width:130px;min-width:0}

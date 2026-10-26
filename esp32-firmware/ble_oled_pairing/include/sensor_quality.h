@@ -3,14 +3,14 @@
 #include <cstdint>
 
 namespace sws {
-enum class QualityState {Valid,Suspect,Invalid,Stale,Unconfigured};
+enum class QualityState {Valid,Suspect,Invalid,Stale};
 inline const char* qualityName(QualityState state){
   switch(state){case QualityState::Valid:return "valid";case QualityState::Suspect:return "suspect";
     case QualityState::Invalid:return "invalid";case QualityState::Stale:return "stale";
-    default:return "unconfigured";}
+    default:return "invalid";}
 }
 class ChannelQuality {
-  QualityState current=QualityState::Unconfigured;
+  QualityState current=QualityState::Valid;
   double previous=NAN,pendingJump=NAN,provokedFrom=NAN;
   uint32_t failures=0,recoveries=0,jumps=0,unchanged=0,lastGoodAt=0;
   bool provoked=false;
@@ -23,8 +23,7 @@ public:
   bool stuckAfterStimulus()const{return provoked&&unchanged>=3;}
   void reset(){*this=ChannelQuality{};}
   bool provoke(){if(!std::isfinite(previous))return false;provoked=true;provokedFrom=previous;unchanged=0;return true;}
-  QualityState observe(double value,bool configured,bool fresh,double jumpLimit,uint32_t now){
-    if(!configured){current=QualityState::Unconfigured;return current;}
+  QualityState observe(double value,bool fresh,double jumpLimit,uint32_t now){
     if(!fresh){current=QualityState::Stale;return current;}
     if(!std::isfinite(value)){
       failures++;recoveries=0;pendingJump=NAN;

@@ -18,7 +18,6 @@ class BoardRuntime:public sws::RuntimeIO {
   Preferences prefs;
   bool initialized=false,nvs=false,logs=false,pumpState=false,clockTrusted=false,sampleDone=false,resumed=false;
   std::string deviceId,serialLine;
-  sws::Calibration calibration;
   sws::RuntimeConfig config;
   sws::WateringRuntime control;
   JsonDocument latest;
@@ -35,8 +34,6 @@ class BoardRuntime:public sws::RuntimeIO {
   unsigned acquisition=0,adcCount=0,servoStage=0;
   int soil[5]{},rain[5]{},solar[5]{};
   double temperature=NAN,humidity=NAN;
-  double cachedTemperature=NAN,cachedHumidity=NAN;
-  uint32_t cachedAirAt=0,cachedAirSeq=0;
   unsigned quickRemaining=0,quickValid=0;
   std::string quickStimulatedKey;
   const char* channelKeys[5]={"temperatureC","humidityPct","soilAdc","rainAdc","solarVoltageV"};
@@ -104,7 +101,7 @@ class BoardRuntime:public sws::RuntimeIO {
     if(!pulse(HIGH,width)||!pulse(LOW,width)||!pulse(HIGH,width))return;
     for(int bit=0;bit<40;bit++){if(!pulse(LOW,width)||!pulse(HIGH,width))return;data[bit/8]=(data[bit/8]<<1)|(width>45);}
     if(uint8_t(data[0]+data[1]+data[2]+data[3])!=data[4])return;
-    if(calibration.dhtModel==22){humidity=((uint16_t(data[0])<<8)|data[1])/10.;temperature=(((uint16_t(data[2]&0x7f)<<8)|data[3])/10.)*((data[2]&0x80)?-1:1);}
+    if(SWS_DHT_MODEL==22){humidity=((uint16_t(data[0])<<8)|data[1])/10.;temperature=(((uint16_t(data[2]&0x7f)<<8)|data[3])/10.)*((data[2]&0x80)?-1:1);}
     else {humidity=data[0]+data[1]/10.;temperature=data[2]+data[3]/10.;}
     if(temperature<-20||temperature>60||humidity<0||humidity>100)temperature=humidity=NAN;
   }
@@ -112,22 +109,21 @@ class BoardRuntime:public sws::RuntimeIO {
     bool firstSample=!sampleDone;
     digitalWrite(SWS_SENSOR_POWER_PIN,LOW);pinMode(SWS_DHT_PIN,INPUT);acquisition=0;sampleAt=now;sampleDone=true;
     const double rawTemperature=temperature,rawHumidity=humidity;
-    sws::SensorReading s;s.temperature=temperature;s.humidity=humidity;s.soil=median(soil);s.rain=median(rain);
-    int millivolts=median(solar);s.solar=calibration.valid()&&millivolts<2500?millivolts/1000./calibration.solarDivider:NAN;s.sequence=++seq;
+    const int rawSoil=median(soil),rawRain=median(rain),millivolts=median(solar);
+    const double directSolar=millivolts/1000./SWS_SOLAR_DIVIDER;
+    sws::SensorReading s;s.temperature=temperature;s.humidity=humidity;s.soil=rawSoil;s.rain=rawRain;
+    s.solar=millivolts<2500?directSolar:NAN;s.sequence=++seq;
     bool directAir=std::isfinite(s.temperature)&&std::isfinite(s.humidity);
-    if(directAir){cachedTemperature=s.temperature;cachedHumidity=s.humidity;cachedAirAt=now;cachedAirSeq=seq;}
-    else if(calibration.allowAirFallback&&std::isfinite(cachedTemperature)&&uint32_t(now-cachedAirAt)<=600000){s.temperature=cachedTemperature;s.humidity=cachedHumidity;s.airMeasured=false;}
-    if(s.soil<=0||s.soil>=4095||(calibration.valid()&&(s.soil<calibration.soilMin||s.soil>calibration.soilMax)))s.soil=-1;
-    if(s.rain<=0||s.rain>=4095||(calibration.valid()&&(s.rain<calibration.rainMin||s.rain>calibration.rainMax)))s.rain=-1;
+    if(s.soil<sws::SENSOR_ADC_MIN||s.soil>sws::SENSOR_ADC_MAX)s.soil=-1;
+    if(s.rain<sws::SENSOR_ADC_MIN||s.rain>sws::SENSOR_ADC_MAX)s.rain=-1;
     const double rawValues[]={s.temperature,s.humidity,double(s.soil),double(s.rain),s.solar};
-    const int rawSoil=s.soil,rawRain=s.rain;
-    const bool suppliedFailure=calibration.valid()&&!directAir&&s.soil<0&&s.rain<0;
+    const bool suppliedFailure=!directAir&&s.soil<0&&s.rain<0;
     const double jumps[]={7,25,950,950,7};
     sws::QualityState states[5];
     for(int i=0;i<5;i++){
       double value=rawValues[i];if(i==2||i==3){if(value<0)value=NAN;}
-      states[i]=channelQuality[i].observe(value,calibration.valid(),i<2?s.airMeasured:true,jumps[i],now);
-      if(suppliedFailure&&states[i]!=sws::QualityState::Unconfigured)states[i]=sws::QualityState::Suspect;
+      states[i]=channelQuality[i].observe(value,true,jumps[i],now);
+      if(suppliedFailure)states[i]=sws::QualityState::Suspect;
     }
     if(states[0]!=sws::QualityState::Valid&&states[0]!=sws::QualityState::Stale)s.temperature=NAN;
     if(states[1]!=sws::QualityState::Valid&&states[1]!=sws::QualityState::Stale)s.humidity=NAN;
@@ -140,28 +136,22 @@ class BoardRuntime:public sws::RuntimeIO {
     row["rawSoilAdc"]=rawSoil;row["rawRainAdc"]=rawRain;
     if(std::isfinite(rawTemperature))row["rawTemperatureC"]=rawTemperature;else row["rawTemperatureC"]=nullptr;
     if(std::isfinite(rawHumidity))row["rawHumidityPct"]=rawHumidity;else row["rawHumidityPct"]=nullptr;
-    if(std::isfinite(s.temperature))row["temperatureC"]=s.temperature;else row["temperatureC"]=nullptr;
-    if(std::isfinite(s.humidity))row["humidityPct"]=s.humidity;else row["humidityPct"]=nullptr;
-    if(s.soil>=0)row["soilAdc"]=s.soil;else row["soilAdc"]=nullptr;
-    if(s.rain>=0)row["rainAdc"]=s.rain;else row["rainAdc"]=nullptr;
-    if(std::isfinite(s.solar))row["solarVoltageV"]=s.solar;else row["solarVoltageV"]=nullptr;
+    if(std::isfinite(rawTemperature))row["temperatureC"]=rawTemperature;else row["temperatureC"]=nullptr;
+    if(std::isfinite(rawHumidity))row["humidityPct"]=rawHumidity;else row["humidityPct"]=nullptr;
+    row["soilAdc"]=rawSoil;row["rainAdc"]=rawRain;row["solarVoltageV"]=directSolar;
     row["solarAdcMilliVolts"]=millivolts;
     if(std::isfinite(control.demand()))row["wateringDemand"]=control.demand();else row["wateringDemand"]=nullptr;
     row["rainDetected"]=control.raining();row["watered"]=false;
     auto q=row["quality"].to<JsonObject>();
     for(int i=0;i<5;i++){
-      const char* reason=!calibration.valid()?"calibration-required":suppliedFailure?"sensor-supply-suspected":
+      const char* reason=suppliedFailure?"sensor-supply-suspected":
         channelQuality[i].stuckAfterStimulus()?"stuck-after-stimulus":
-        i<2&&!s.airMeasured?"recent-valid-fallback":i<2?"read-failed":i==4?"voltage-out-of-range":"out-of-range-or-jump";
+        i<2?"read-failed":i==4?"voltage-out-of-range":"out-of-range-or-jump";
       quality(q,i,states[i],reason);
-      if(i<2&&states[i]==sws::QualityState::Stale&&s.airMeasured==false){
-        q[channelKeys[i]]["ageSeconds"]=uint32_t(now-cachedAirAt)/1000;
-        q[channelKeys[i]]["sourceSampleSeq"]=cachedAirSeq;
-      }
       bool abnormal=states[i]==sws::QualityState::Suspect||states[i]==sws::QualityState::Invalid;
       if(abnormal&&!invalidChannel[i])sensorEvent(channelKeys[i],false);
       if(states[i]==sws::QualityState::Valid&&invalidChannel[i])sensorEvent(channelKeys[i],true);
-      if(states[i]!=sws::QualityState::Unconfigured)invalidChannel[i]=abnormal;
+      invalidChannel[i]=abnormal;
     }
     if(suppliedFailure&&!supplySuspected)runtimeEvent("sensor-supply-suspected","共用传感器供电或接线待检查，自动浇水保持抑制");
     if(!suppliedFailure&&supplySuspected)runtimeEvent("sensor-supply-recovered","各通道重新采样；仍需核对质量状态");
@@ -180,31 +170,26 @@ class BoardRuntime:public sws::RuntimeIO {
     if(quickRemaining){if(states[0]==sws::QualityState::Valid&&states[1]==sws::QualityState::Valid&&s.soil>=0&&s.rain>=0)quickValid++;if(--quickRemaining==0){runtimeEvent("quick-check-completed","三轮快速检查已结束，请查看有效样本数");Serial.printf("QUICK_CHECK valid=%u total=3\n",quickValid);}}
     bool retain=(control.currentMode()=="LONGRUN"&&(firstSample||uint32_t(now-lastHistory)>=60000))||(control.currentMode()=="PREPARE"&&uint32_t(now-lastHistory)>=60000);
     if(retain){history.push_back(sws::json(row));trim(history,168,49152);lastHistory=now;dirty=true;}
-    nextSample=now+std::max<uint32_t>(2000,calibration.dhtIntervalMs);
+    nextSample=now+SWS_SAMPLE_INTERVAL_MS;
   }
   void sensorEvent(const char* key,bool recovered){
     if(recovered){for(auto it=events.rbegin();it!=events.rend();++it){JsonDocument e;deserializeJson(e,*it);if(e["sensorKey"]==key&&e["recoveredAt"].isNull()){e["recoveredAt"]=epochTime();*it=sws::json(e);dirty=true;break;}}}
     else {runtimeEvent("sensor-invalid","关键传感器失效时抑制自动浇水");JsonDocument e;deserializeJson(e,events.back());e["sensorKey"]=key;
-      if(std::string(key)=="soilAdc"){e["referenceMin"]=calibration.soilMin;e["referenceMax"]=calibration.soilMax;e["observedSummary"]["value"]=latest["rawSoilAdc"];}
-      else if(std::string(key)=="rainAdc"){e["referenceMin"]=calibration.rainMin;e["referenceMax"]=calibration.rainMax;e["observedSummary"]["value"]=latest["rawRainAdc"];}
+      if(std::string(key)=="soilAdc"){e["referenceMin"]=sws::SENSOR_ADC_MIN;e["referenceMax"]=sws::SENSOR_ADC_MAX;e["observedSummary"]["value"]=latest["rawSoilAdc"];}
+      else if(std::string(key)=="rainAdc"){e["referenceMin"]=sws::SENSOR_ADC_MIN;e["referenceMax"]=sws::SENSOR_ADC_MAX;e["observedSummary"]["value"]=latest["rawRainAdc"];}
       else if(std::string(key)=="temperatureC"){e["referenceMin"]=-20;e["referenceMax"]=60;e["observedSummary"]["value"]=latest["temperatureC"];}
       else if(std::string(key)=="humidityPct"){e["referenceMin"]=0;e["referenceMax"]=100;e["observedSummary"]["value"]=latest["humidityPct"];}
       e["quality"]=latest["quality"][key]["status"];events.back()=sws::json(e);dirty=true;}
   }
-  bool startServo(){if(!calibration.valid()||control.active()||pumpState||servoStage)return false;
-    servoAttached=ledcAttach(SWS_SERVO_PIN,50,14);if(!servoAttached){runtimeEvent("servo-error","擦拭未执行，请检查 PWM 与标定");return false;}
-    ledcWrite(SWS_SERVO_PIN,uint32_t(calibration.servoWipeUs)*16383/20000);servoStage=1;phaseAt=millis();return true;}
-  bool parseCalibration(JsonVariantConst v,sws::Calibration& c){
-    if(!v.is<JsonObjectConst>()||!v["verified"].is<bool>()||v["verified"]!=true||v["boardVersion"]!="10-01"
-      ||!v["measuredAt"].is<const char*>()||v["measuredAt"].as<std::string>().empty())return false;
-    const char* ints[]={"soilWet","soilDry","soilMin","soilMax","rainMin","rainMax","rainThreshold","settleMs","dhtIntervalMs","servoMoveMs","dhtModel","servoParkUs","servoWipeUs"};
-    for(auto key:ints)if(!sws::finiteNumber(v[key],0,60000,true))return false;
-    if(!v["rainWetBelow"].is<bool>()||!sws::finiteNumber(v["flowMlSec"],1,200)||!sws::finiteNumber(v["solarDivider"],.05,1))return false;
-    c.verified=true;c.soilWet=v["soilWet"];c.soilDry=v["soilDry"];c.soilMin=v["soilMin"];c.soilMax=v["soilMax"];
-    c.rainMin=v["rainMin"];c.rainMax=v["rainMax"];c.rainThreshold=v["rainThreshold"];c.rainWetBelow=v["rainWetBelow"];
-    c.flowMlSec=v["flowMlSec"];c.solarDivider=v["solarDivider"];c.settleMs=v["settleMs"];c.dhtIntervalMs=v["dhtIntervalMs"];
-    c.dhtModel=v["dhtModel"];c.servoMoveMs=v["servoMoveMs"];c.servoParkUs=v["servoParkUs"];c.servoWipeUs=v["servoWipeUs"];
-    if(!v["allowAirFallback"].isNull()&&!v["allowAirFallback"].is<bool>())return false;c.allowAirFallback=v["allowAirFallback"]|false;return c.valid();
+  bool startServo(){if(control.active()||pumpState||servoStage)return false;
+    servoAttached=ledcAttach(SWS_SERVO_PIN,50,14);if(!servoAttached){runtimeEvent("servo-error","擦拭未执行，请检查 PWM 和供电");return false;}
+    ledcWrite(SWS_SERVO_PIN,uint32_t(SWS_SERVO_WIPE_US)*16383/20000);servoStage=1;phaseAt=millis();return true;}
+  void reportPumpState(const char* source){
+    if(initialized)delayMicroseconds(5);
+    Serial.printf("PUMPSTATUS source=%s firmware=%s pin=%u on=%u commandedLevel=%u pinLevel=%d activeLevel=%u initialized=%u\n",
+      source,sws::FW_VERSION,unsigned(SWS_PUMP_PIN),unsigned(pumpState),
+      unsigned(pumpState?SWS_PUMP_ON_LEVEL:SWS_PUMP_OFF_LEVEL),initialized?digitalRead(SWS_PUMP_PIN):-1,
+      unsigned(SWS_PUMP_ON_LEVEL),unsigned(initialized));
   }
   void serialCommand(){
     unsigned count=0;while(Serial.available()&&count++<128){char c=Serial.read();if(c=='\r')continue;
@@ -212,18 +197,18 @@ class BoardRuntime:public sws::RuntimeIO {
       std::string line=serialLine;serialLine.clear();
       if(line=="STOP"){shutdown();Serial.println("STOPPED");continue;}
       if(line=="SAMPLE"){Serial.println(sws::json(latest).c_str());continue;}
+      if(line=="PUMPSTATUS"){reportPumpState("query");continue;}
       if(control.currentMode()!="DISPLAY"||control.active()){Serial.println("DISPLAY_REQUIRED");continue;}
       if(provision&&provision(line))continue;
       if(line=="LOGFORMAT"){logs=LittleFS.format()&&LittleFS.begin(false);history.clear();events.clear();logSeq=0;dirty=true;logs=logs&&flush();control.storage(logs&&nvs);Serial.println(logs?"LOGS_READY":"LOGS_FAILED");}
-      else if(line=="WIPE"){startServo();}
-      else if(line.rfind("CAL ",0)==0){JsonDocument d;sws::Calibration c;if(deserializeJson(d,line.substr(4))||!parseCalibration(d,c))Serial.println("CAL_INVALID");
-        else if(!saveRecord("calibration",sws::json(d)))Serial.println("CAL_SAVE_FAILED");else {calibration=c;control.calibrate(c);Serial.println("CAL_SAVED");}}
+      else if(line=="WIPE"){Serial.println(startServo()?"WIPE_STARTED":"WIPE_UNAVAILABLE");}
+      else Serial.println("UNKNOWN_COMMAND");
     }
   }
 public:
   std::function<bool(const std::string&)> provision;
   BoardRuntime():control(*this){}
-  void pump(bool on)override{pumpState=on;if(initialized)digitalWrite(SWS_PUMP_PIN,on?HIGH:LOW);}
+  void pump(bool on)override{pumpState=on;if(initialized){digitalWrite(SWS_PUMP_PIN,on?SWS_PUMP_ON_LEVEL:SWS_PUMP_OFF_LEVEL);reportPumpState("command");}}
   void manualPumpOff(const char* code="manual-pump-off"){
     if(!manualPumpOn)return;manualPumpOn=false;pump(false);runtimeEvent(code,"手动水泵已关闭");}
   bool checkpoint(bool attempting,uint32_t revision)override{JsonDocument d;d["attempting"]=attempting;d["revision"]=revision;
@@ -245,7 +230,7 @@ public:
     if(std::string(code)=="watering-completed"&&!latest.isNull()){latest["watered"]=true;history.push_back(sws::json(latest));trim(history,168,49152);}
   }
   void begin(const std::string& id){
-    deviceId=id;pinMode(SWS_PUMP_PIN,OUTPUT);digitalWrite(SWS_PUMP_PIN,LOW);pinMode(SWS_SENSOR_POWER_PIN,OUTPUT);digitalWrite(SWS_SENSOR_POWER_PIN,LOW);
+    deviceId=id;digitalWrite(SWS_PUMP_PIN,SWS_PUMP_OFF_LEVEL);pinMode(SWS_PUMP_PIN,OUTPUT);pinMode(SWS_SENSOR_POWER_PIN,OUTPUT);digitalWrite(SWS_SENSOR_POWER_PIN,LOW);
 #if SWS_WAKE_PIN >= 0
     pinMode(SWS_WAKE_PIN,INPUT_PULLUP);
 #endif
@@ -262,7 +247,6 @@ public:
     resumedWait=clockTrusted&&swsSleep.remaining>actual?swsSleep.remaining-actual:0;
     std::string raw;JsonDocument d;bool interrupted=loadRecord("attempt",raw)&&!deserializeJson(d,raw)&&d["attempting"]==true;
     control.begin(millis(),nvs&&logs,interrupted,resumedWait);control.clock(clockTrusted);
-    if(loadRecord("calibration",raw)){d.clear();if(!deserializeJson(d,raw)&&parseCalibration(d,calibration))control.calibrate(calibration);}
     runtimeEvent("boot","上电先关泵；运行前置条件通过后方可自动浇水");
   }
   void configure(JsonVariantConst c,bool restoring=false){auto p=c["params"];config.revision=c["revision"]|0;config.bound=c["configVersion"]=="2.0";
@@ -285,8 +269,8 @@ public:
     auto caps=out["capabilities"].as<JsonArray>();for(auto s:{"sample-quality","events","time-sync","time-probe","emergency-stop","prepare-summary","quick-check","manual-control"})caps.add(s);
     out["wakeSources"]["timer"]=true;out["wakeSources"]["button"]=SWS_WAKE_PIN>=0;}
   void status(JsonObject out){if(latest.isNull())out["sample"]=nullptr;else out["sample"].set(latest);
-    out["sensorState"]=calibration.valid()?"calibrated":"uncalibrated";
-    out["mode"]=control.currentMode();out["automaticWatering"]=control.automaticReady();out["calibrationReady"]=calibration.valid();out["timeQuality"]=clockTrusted?"trusted":"unknown";
+    out["sensorState"]=latest.isNull()?"starting":"sampling";
+    out["mode"]=control.currentMode();out["automaticWatering"]=control.automaticReady();out["timeQuality"]=clockTrusted?"trusted":"unknown";
     if(lastSyncAt>0)out["lastSyncAt"]=lastSyncAt;else out["lastSyncAt"]=nullptr;
     out["controlState"]=manualPumpOn?"manual-watering":control.active()?"watering":"idle";out["controlInhibition"]=control.inhibition();
     out["manualPumpOn"]=manualPumpOn;out["servoBusy"]=servoStage!=0;
@@ -302,7 +286,7 @@ public:
       if(stats.valid){v["mean"]=stats.mean();v["min"]=stats.minimum;v["max"]=stats.maximum;v["largestStep"]=stats.largestStep;v["firstSampleUptimeMs"]=stats.firstAt;v["lastSampleUptimeMs"]=stats.lastAt;}
       else {v["mean"]=nullptr;v["min"]=nullptr;v["max"]=nullptr;}}
     auto baselines=summary["baseline"].to<JsonObject>();for(int i=0;i<5;i++){double value=control.baselineValue(i);if(std::isfinite(value))baselines[keys[i]]=value;else baselines[keys[i]]=nullptr;}
-    summary["complete"]=control.prepareComplete();summary["finishedAt"]=prepareFinishedAt;summary["durationSeconds"]=control.prepareComplete()?600:0;summary["bootCount"]=boot;summary["configRevision"]=config.revision;summary["flowRateMlSec"]=calibration.valid()?calibration.flowMlSec:0;}
+    summary["complete"]=control.prepareComplete();summary["finishedAt"]=prepareFinishedAt;summary["durationSeconds"]=control.prepareComplete()?600:0;summary["bootCount"]=boot;summary["configRevision"]=config.revision;}
   bool modeAllowed(const std::string& mode){return mode=="DISPLAY"||mode=="PREPARE"||(mode=="LONGRUN"&&control.automaticReady());}
   bool changeMode(const std::string& mode){if(!modeAllowed(mode))return false;manualPumpOff();if(mode!="LONGRUN")shutdown();if(!control.setMode(mode,millis()))return false;sampleDone=false;nextSample=0;if(mode=="LONGRUN")startServo();return true;}
   bool active()const{return control.active()||manualPumpOn;}
@@ -313,22 +297,21 @@ public:
     if(control.active()){second="正在脉冲浇水";snprintf(text,sizeof(text),"%lu / %lu",(unsigned long)control.completedPulses(),(unsigned long)config.pulses);third=text;return true;}
     if((millis()/2000)%2==0){snprintf(text,sizeof(text),"T%.1f H%.1f",latest["temperatureC"].isNull()?NAN:latest["temperatureC"].as<double>(),latest["humidityPct"].isNull()?NAN:latest["humidityPct"].as<double>());second=text;}
     else {snprintf(text,sizeof(text),"S%d R%d",latest["soilAdc"]|-1,latest["rainAdc"]|-1);second=text;}
-    third=calibration.valid()?control.currentMode():"请先完成标定";return true;
+    third=control.currentMode();return true;
   }
   int request(const std::string& action,JsonVariantConst p,JsonObject out,std::string& error){
     if(action=="manualServo"){
       if(control.currentMode()!="DISPLAY"||control.active()||manualPumpOn){error="请先进入展示模式并关闭水泵";return -1;}
-      if(!calibration.valid()){error="请先完成舵机端点的实物标定";return -1;}
       if(servoStage){error="舵机正在执行上一次动作";return -1;}
       if(!startServo()){error="舵机 PWM 启动失败，请检查接线与供电";return -1;}
-      out["started"]=true;out["durationMs"]=calibration.servoMoveMs*2;return 1;
+      out["started"]=true;out["durationMs"]=SWS_SERVO_MOVE_MS*2;return 1;
     }
     if(action=="manualPump"){
       if(!p["on"].is<bool>()){error="水泵命令缺少开关状态";return -1;}
       if(control.currentMode()!="DISPLAY"||control.active()||servoStage){error="请先进入展示模式并等待舵机停止";return -1;}
       bool on=p["on"].as<bool>();
-      if(on&&!manualPumpOn){pump(true);manualPumpOn=true;manualPumpAt=millis();runtimeEvent("manual-pump-on","手动水泵已开启，30 秒后自动关闭");}
-      if(!on)manualPumpOff();
+      if(on){pump(true);if(!manualPumpOn){manualPumpOn=true;manualPumpAt=millis();runtimeEvent("manual-pump-on","手动水泵已开启，30 秒后自动关闭");}}
+      else if(manualPumpOn)manualPumpOff();else pump(false);
       out["pumpOn"]=manualPumpOn;out["maxRunSeconds"]=30;return 1;
     }
     if(action=="quickCheck"){
@@ -370,22 +353,22 @@ public:
     if(end<records.size())out["nextCursor"]=std::to_string(end);else out["nextCursor"]=nullptr;return 1;
   }
   void shutdown(){manualPumpOff();control.stop();digitalWrite(SWS_SENSOR_POWER_PIN,LOW);pinMode(SWS_DHT_PIN,INPUT);acquisition=0;if(servoAttached)ledcDetach(SWS_SERVO_PIN);pinMode(SWS_SERVO_PIN,OUTPUT);digitalWrite(SWS_SERVO_PIN,LOW);servoAttached=false;servoStage=0;flush();}
-  bool erase(){shutdown();control.reset();calibration=sws::Calibration{};config=sws::RuntimeConfig{};clockTrusted=false;lastSyncAt=0;swsSleep={};bool ok=nvs&&prefs.clear();
+  bool erase(){shutdown();control.reset();config=sws::RuntimeConfig{};clockTrusted=false;lastSyncAt=0;swsSleep={};bool ok=nvs&&prefs.clear();
     for(int slot=0;slot<2;slot++){String path=String("/sws-log-")+slot+".log";if(LittleFS.exists(path)&&!LittleFS.remove(path))ok=false;}
     history.clear();events.clear();logSeq=0;dirty=true;return ok&&flush();}
   void tick(uint32_t now,bool linked,bool txIdle){
     serialCommand();control.storage(nvs&&logs);control.tick(now);
     if(manualPumpOn&&uint32_t(now-manualPumpAt)>=30000)manualPumpOff("manual-pump-timeout");
-    if(servoStage&&uint32_t(now-phaseAt)>=calibration.servoMoveMs){if(servoStage==1){ledcWrite(SWS_SERVO_PIN,uint32_t(calibration.servoParkUs)*16383/20000);servoStage=2;phaseAt=now;}
+    if(servoStage&&uint32_t(now-phaseAt)>=SWS_SERVO_MOVE_MS){if(servoStage==1){ledcWrite(SWS_SERVO_PIN,uint32_t(SWS_SERVO_PARK_US)*16383/20000);servoStage=2;phaseAt=now;}
       else {ledcDetach(SWS_SERVO_PIN);servoAttached=false;servoStage=0;runtimeEvent("wipe-completed","舵机擦拭命令已完成，需以实物动作验收");}}
     bool waitForSleep=control.currentMode()=="LONGRUN"&&sampleDone&&!control.active()&&!linked;
     if(!waitForSleep&&!servoStage&&acquisition==0&&int32_t(now-nextSample)>=0){digitalWrite(SWS_SENSOR_POWER_PIN,HIGH);temperature=humidity=NAN;acquisition=1;phaseAt=now;}
-    if(acquisition==1&&uint32_t(now-phaseAt)>=calibration.settleMs){pinMode(SWS_DHT_PIN,OUTPUT);digitalWrite(SWS_DHT_PIN,LOW);acquisition=2;phaseAt=now;}
-    if(acquisition==2&&uint32_t(now-phaseAt)>=(calibration.dhtModel==22?2:20)){captureDht();adcCount=0;acquisition=3;lastAdc=now;}
+    if(acquisition==1&&uint32_t(now-phaseAt)>=SWS_SENSOR_SETTLE_MS){pinMode(SWS_DHT_PIN,OUTPUT);digitalWrite(SWS_DHT_PIN,LOW);acquisition=2;phaseAt=now;}
+    if(acquisition==2&&uint32_t(now-phaseAt)>=(SWS_DHT_MODEL==22?2:20)){captureDht();adcCount=0;acquisition=3;lastAdc=now;}
     if(acquisition==3&&uint32_t(now-lastAdc)>=5){lastAdc=now;soil[adcCount]=analogRead(SWS_SOIL_PIN);rain[adcCount]=analogRead(SWS_RAIN_PIN);solar[adcCount]=analogReadMilliVolts(SWS_SOLAR_PIN);if(++adcCount==5)finishSample(now);}
     if(logs&&dirty&&!pumpState&&uint32_t(now-lastFlush)>=60000){lastFlush=now;if(!flush()){logs=false;control.storage(false);runtimeEvent("log-storage-failed","日志保存失败，自动浇水暂停");}}
     if(control.currentMode()=="LONGRUN"&&sampleDone&&!control.active()&&!linked&&txIdle&&uint32_t(now-sampleAt)>=10000&&control.automaticReady()){
-      if(!flush()){logs=false;return;}digitalWrite(SWS_PUMP_PIN,LOW);digitalWrite(SWS_SENSOR_POWER_PIN,LOW);pinMode(SWS_DHT_PIN,INPUT);
+      if(!flush()){logs=false;return;}digitalWrite(SWS_PUMP_PIN,SWS_PUMP_OFF_LEVEL);digitalWrite(SWS_SENSOR_POWER_PIN,LOW);pinMode(SWS_DHT_PIN,INPUT);
       swsSleep={};swsSleep.magic=0x53575336;swsSleep.boot=boot;swsSleep.revision=config.revision;swsSleep.remaining=control.intervalRemainingMs();swsSleep.savedEpoch=time(nullptr);
       swsSleep.crc=sws::crc32(std::string(reinterpret_cast<char*>(&swsSleep),offsetof(SleepCheckpoint,crc)));
        if(esp_sleep_enable_timer_wakeup(7200ULL*1000000)==ESP_OK){

@@ -5,6 +5,7 @@ import { DemoTransport } from '../static/js/services/demo.js';
 import { DeviceController } from '../static/js/services/device.js';
 import { BleTransport } from '../static/js/services/ble.js';
 import { validateConfigFile, importedConfigResult, configFileContents } from '../static/js/services/config-file.js';
+import { readConnectionSession, CONNECTION_SESSION_KEY } from '../static/js/services/connection-session.js';
 
 const bleSettings = {
   serviceUuid:'00000000-0000-4000-8000-000000000001',
@@ -38,6 +39,53 @@ function mockGatt(t) {
   }
   return {selected,gatt,service,reader,demo};
 }
+
+test('a remembered permitted device reconnects without a chooser and completes a fresh handshake and status read',async t=>{
+  const {selected,gatt,demo}=mockGatt(t),controller=new DeviceController();t.after(()=>controller.disconnect());
+  const items=new Map(),previous=Object.getOwnPropertyDescriptor(globalThis,'sessionStorage');
+  Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:{getItem:key=>items.get(key)??null,setItem:(key,value)=>items.set(key,value),removeItem:key=>items.delete(key)}});
+  t.after(()=>previous?Object.defineProperty(globalThis,'sessionStorage',previous):delete globalThis.sessionStorage);
+  const actions=[],request=demo.request.bind(demo);demo.request=(action,...args)=>{actions.push(action);return request(action,...args);};
+  await controller.connect(bleSettings,false,{remember:true});
+  const saved=readConnectionSession();assert.equal(saved.browserDeviceId,selected.id);
+  controller.disconnect();
+  navigator.bluetooth.requestDevice=async()=>{throw new Error('A reload must not open a chooser');};
+  navigator.bluetooth.getDevices=async()=>[{id:'different-device',gatt:{connect(){throw new Error('Wrong device');}}},selected];
+  await controller.connect(saved.settings,false,{remember:true,rememberedDeviceId:saved.browserDeviceId,expectedDeviceId:saved.deviceId});
+  assert.equal(controller.state,'ready');assert.equal(gatt.connects,2);
+  for(const action of ['handshake','authenticate','status'])assert.equal(actions.filter(value=>value===action).length,2);
+  controller.disconnect('',{forget:true});assert.equal(items.has(CONNECTION_SESSION_KEY),false);
+});
+
+test('unsupported recovery and revoked permission never open a chooser and leave manual connection available',async t=>{
+  const {selected,gatt}=mockGatt(t),controller=new DeviceController();t.after(()=>controller.disconnect());
+  let choosers=0;navigator.bluetooth.requestDevice=async()=>{choosers++;return selected;};
+  const options={rememberedDeviceId:selected.id,expectedDeviceId:'DEMO-WATER001'};
+  await assert.rejects(controller.connect(bleSettings,false,options),/未开放蓝牙自动恢复/);
+  assert.equal(controller.busy,false);
+  navigator.bluetooth.getDevices=async()=>[{id:'other'}];
+  await assert.rejects(controller.connect(bleSettings,false,options),/未找到上次设备/);
+  assert.equal(choosers,0);assert.equal(gatt.connects,0);
+  await controller.connect(bleSettings);assert.equal(controller.state,'ready');assert.equal(choosers,1);
+});
+
+test('cancelled permission lookup cannot reconnect after a manual disconnect',async t=>{
+  const {selected,gatt}=mockGatt(t),controller=new DeviceController();t.after(()=>controller.disconnect());
+  const permitted=deferred();navigator.bluetooth.getDevices=()=>permitted.promise;
+  const pending=controller.connect(bleSettings,false,{rememberedDeviceId:selected.id});
+  const rejected=assert.rejects(pending,/连接已取消/);
+  assert.equal(controller.connectionPhase,'restoring');controller.disconnect('',{forget:true});
+  permitted.resolve([selected]);await rejected;
+  assert.equal(controller.state,'disconnected');assert.equal(gatt.connects,0);
+});
+
+test('restoration verifies the saved protocol identity before authenticating',async t=>{
+  const {selected,gatt,demo}=mockGatt(t),controller=new DeviceController();t.after(()=>controller.disconnect());
+  navigator.bluetooth.getDevices=async()=>[selected];
+  const actions=[],request=demo.request.bind(demo);demo.request=(action,...args)=>{actions.push(action);return request(action,...args);};
+  await assert.rejects(controller.connect(bleSettings,false,{rememberedDeviceId:selected.id,expectedDeviceId:'C3-other'}),/设备身份不匹配/);
+  assert.deepEqual(actions,['handshake']);assert.equal(gatt.connected,false);assert.equal(controller.busy,false);
+});
 
 test('GATT disconnect during discovery recovers before exposing ready device panels',async t=>{
   const {gatt,service}=mockGatt(t),controller=new DeviceController();t.after(()=>controller.disconnect());
@@ -309,11 +357,14 @@ test('repeat status reads do not add the same sample to the trend',async()=>{
 test('sample quality suppresses invalid soil trend points and event pages retain device identity',async()=>{
   const controller=new DeviceController();await controller.connect({},true);controller.transport.latency=0;
   const initial=controller.trend.length;
-  const sample={...controller.status.sample,sampleSeq:100,soilAdc:null,quality:{...controller.status.sample.quality,soilAdc:{status:'invalid',reason:'open-circuit'}}};
+  const sample={...controller.status.sample,sampleSeq:100,soilAdc:6,quality:{...controller.status.sample.quality,soilAdc:{status:'invalid',reason:'open-circuit'}}};
   validateStatus({...controller.status,sample},controller.status.deviceId);
   controller.status={...controller.status,sample};controller.record();
   assert.equal(controller.trend.length,initial);
-  assert.throws(()=>validateStatus({...controller.status,sample:{...sample,soilAdc:200}},controller.status.deviceId),/无效通道/);
+  assert.equal(validateHistory([sample])[0].soilAdc,6);
+  assert.equal(validateStatus({...controller.status,sample:{...sample,soilAdc:200}},controller.status.deviceId).sample.soilAdc,200);
+  assert.throws(()=>validateStatus({...controller.status,sample:{...sample,soilAdc:4096}},controller.status.deviceId),/设备采样数据无效/);
+  assert.throws(()=>validateStatus({...controller.status,sample:{...sample,quality:{soilAdc:{status:'unknown'}}}},controller.status.deviceId),/通道质量格式无效/);
   assert.throws(()=>validateStatus({...controller.status,sample:{...sample,sampleSeq:-1}},controller.status.deviceId),/采样身份/);
   const events=await controller.readEvents();assert.equal(events.length,2);
   assert.equal(events[0].code,'sensor-invalid');
@@ -323,20 +374,27 @@ test('sample quality suppresses invalid soil trend points and event pages retain
   controller.disconnect();
 });
 
-test('uncalibrated readings show raw diagnostics without treating them as valid samples',async()=>{
+test('direct readings remain visible at ADC limits and do not create a valid control sample',async()=>{
   const controller=new DeviceController();await controller.connect({},true);controller.transport.latency=0;
-  const sample={...controller.status.sample,sampleSeq:101,temperatureC:null,humidityPct:null,soilAdc:null,rainAdc:null,solarVoltageV:null,wateringDemand:null,
-    rawTemperatureC:25,rawHumidityPct:54,rawSoilAdc:3,rawRainAdc:4,solarAdcMilliVolts:206,
-    quality:Object.fromEntries(['temperatureC','humidityPct','soilAdc','rainAdc','solarVoltageV'].map(key=>[key,{status:'unconfigured',reason:'calibration-required'}]))};
-  controller.status=validateStatus({...controller.status,calibrationReady:false,manualPumpOn:true,sample},controller.status.deviceId);
+  const sample={...controller.status.sample,sampleSeq:101,temperatureC:25,humidityPct:54,soilAdc:0,rainAdc:4095,solarVoltageV:1.03,wateringDemand:null,
+    rawTemperatureC:25,rawHumidityPct:54,rawSoilAdc:0,rawRainAdc:4095,solarAdcMilliVolts:206,
+    quality:Object.fromEntries(['temperatureC','humidityPct','soilAdc','rainAdc','solarVoltageV'].map(key=>[key,{status:'invalid',reason:'read-failed'}]))};
+  controller.status=validateStatus({...controller.status,manualPumpOn:true,sample},controller.status.deviceId);
   const trendLength=controller.trend.length;controller.record();
   assert.equal(controller.trend.length,trendLength);
   const html=devicePage({settings:{}},controller);
-  assert.match(html,/土壤原始 ADC<\/span><strong>3/);
-  assert.match(html,/雨量原始 ADC<\/span><strong>4/);
-  assert.match(html,/温度直接读数<\/span><strong>25/);
+  assert.match(html,/土壤原始 ADC<\/span><strong>0/);
+  assert.match(html,/雨量原始 ADC<\/span><strong>4095/);
+  assert.match(html,/空气温度<\/span><strong>25/);
+  assert.match(html,/太阳能 ADC 电压<\/span><strong>206/);
+  controller.status.sample={...sample,rawTemperatureC:null,temperatureC:27};
+  assert.match(devicePage({settings:{}},controller),/空气温度<\/span><strong>—/);
   assert.match(html,/设备已确认开泵命令；未检测实际出水/);
   assert.throws(()=>validateStatus({...controller.status,sample:{...sample,rawSoilAdc:4096}},controller.status.deviceId),/原始采样数据无效/);
+  controller.status.manualPumpOn=false;controller.history=[sample];
+  const readyHtml=devicePage({settings:{},historyOpen:true},controller);
+  assert.ok(!readyHtml.match(/<button[^>]*data-action="manual-servo"[^>]*>/)[0].includes('disabled'));
+  assert.match(readyHtml,/<td>25 °C<\/td><td>54%<\/td><td>0<\/td><td>4095<\/td>/);
   controller.disconnect();
 });
 
@@ -425,15 +483,15 @@ test('background status leaves user operations available and discards a disconne
   assert.equal(controller.refreshing,false);controller.disconnect();
 });
 
-test('device summary requires direct preparation data, current revision and calibrated flow',async()=>{
+test('device summary requires fresh direct preparation data and the current revision',async()=>{
   const controller=new DeviceController();await controller.connect({},true);controller.transport.latency=0;
   controller.demo=false;controller.handshake.capabilities.push('prepare-summary');
-  controller.status={...controller.status,calibrationReady:true,timeQuality:'trusted',prepareSummary:{
+  controller.status={...controller.status,timeQuality:'trusted',prepareSummary:{
     complete:true,validSamples:100,totalSamples:110,durationSeconds:600,configRevision:0,
-    temperatureC:25,humidityPct:60,flowRateMlSec:20,finishedAt:Math.floor(Date.now()/1000)}};
-  assert.equal(controller.observationReport().flowRateMlSec,20);
+    temperatureC:25,humidityPct:60,finishedAt:Math.floor(Date.now()/1000)}};
+  assert.equal(controller.observationReport().temperatureC,25);
   const valid=structuredClone(controller.status.prepareSummary);
-  for(const change of [{durationSeconds:undefined},{configRevision:1},{flowRateMlSec:0},{totalSamples:200},{finishedAt:valid.finishedAt-3601}]){
+  for(const change of [{durationSeconds:undefined},{configRevision:1},{humidityPct:101},{totalSamples:200},{finishedAt:valid.finishedAt-3601}]){
     controller.status.prepareSummary={...valid,...change};assert.throws(()=>controller.observationReport());
   }controller.disconnect();
 });

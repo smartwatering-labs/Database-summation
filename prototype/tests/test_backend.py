@@ -88,10 +88,10 @@ class BackendTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             validate_config(invalid)
 
-    def test_device_summary_requires_fresh_calibrated_bound_prepare_data(self):
-        report={'deviceId':'C3-012345abcdef','calibrationReady':True,'complete':True,'timeQuality':'trusted',
+    def test_device_summary_uses_direct_prepare_data_and_preserves_database_flow(self):
+        report={'deviceId':'C3-012345abcdef','complete':True,'timeQuality':'trusted',
                 'validSamples':100,'totalSamples':110,'durationSeconds':600,'configRevision':7,
-                'temperatureC':35,'humidityPct':30,'flowRateMlSec':20,'finishedAt':int(datetime.now(timezone.utc).timestamp())}
+                'temperatureC':35,'humidityPct':30,'finishedAt':int(datetime.now(timezone.utc).timestamp())}
         arguments={'configVersion':'2.0','targetDeviceId':report['deviceId'],'currentRevision':7}
         regional=self.generate(**arguments).json
         response=self.generate(**arguments,deviceObservation=report)
@@ -99,8 +99,9 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(response.json['source'],'device-summary+api')
         self.assertGreater(response.json['config']['waterNeedMlDay'],regional['config']['waterNeedMlDay'])
         self.assertEqual(response.json['environment']['temperatureC'],25)
-        self.assertEqual(response.json['config']['display']['flowRateMlSec'],20)
-        for change in ({'calibrationReady':False},{'complete':False},{'timeQuality':'relative'},
+        self.assertEqual(response.json['config']['display']['flowRateMlSec'],22)
+        self.assertEqual(self.generate(**arguments,deviceObservation=report|{'flowRateMlSec':199}).json['config']['display']['flowRateMlSec'],22)
+        for change in ({'complete':False},{'timeQuality':'relative'},
                        {'configRevision':6},{'deviceId':'OTHER'},{'totalSamples':200},
                        {'finishedAt':report['finishedAt']-3601},{'durationSeconds':599}):
             self.assertEqual(self.generate(**arguments,deviceObservation=report|change).status_code,400)

@@ -21,6 +21,7 @@ constexpr char SWS_WRITE_UUID[] = "2d26a7cc-1d45-4eae-9280-2a97346fd002";
 constexpr char SWS_NOTIFY_UUID[] = "2d26a7cc-1d45-4eae-9280-2a97346fd003";
 constexpr uint8_t SWS_SENSOR_POWER_PIN=0,SWS_SOLAR_PIN=1,SWS_SERVO_PIN=2;
 constexpr uint8_t SWS_RAIN_PIN=3,SWS_SOIL_PIN=4,SWS_PUMP_PIN=7,SWS_DHT_PIN=10;
+constexpr uint8_t SWS_PUMP_ON_LEVEL=LOW,SWS_PUMP_OFF_LEVEL=HIGH;
 // Set this only after the assembled board has a verified active-low wake button.
 // The 10-01 pin list assigns no such button; timer wake remains available.
 #ifndef SWS_WAKE_PIN

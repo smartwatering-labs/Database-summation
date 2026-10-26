@@ -57,8 +57,8 @@ def validate_scenario(data, plants, builtin_flow=22):
     if report is not None:
         if not isinstance(report, dict) or cleaned["configVersion"] != "2.0" or report.get("deviceId") != cleaned["targetDeviceId"]:
             raise ValidationError("设备实测摘要必须与当前 2.0 配置目标一致", "deviceObservation")
-        if report.get("calibrationReady") is not True or report.get("complete") is not True or report.get("timeQuality") != "trusted":
-            raise ValidationError("设备实测摘要需要已标定、完成准备期和可信时间", "deviceObservation")
+        if report.get("complete") is not True or report.get("timeQuality") != "trusted":
+            raise ValidationError("设备实测摘要需要完成准备期和可信时间", "deviceObservation")
         valid = number(report.get("validSamples"), "有效样本数", 10, 100000, True)
         total = number(report.get("totalSamples"), "总样本数", valid, 100000, True)
         if valid / total < .8:
@@ -76,8 +76,6 @@ def validate_scenario(data, plants, builtin_flow=22):
             "humidityPct": number(report.get("humidityPct"), "实测空气湿度", 0, 100),
             "finishedAt": observed, "validSamples": valid, "totalSamples": total,
             "configRevision": revision, "source": "browser-forwarded-device-summary"}
-        cleaned["flowRateMlSec"] = number(report.get("flowRateMlSec"), "设备标定流量", 1, 200)
-        cleaned["deviceObservation"]["flowRateMlSec"] = cleaned["flowRateMlSec"]
     observation = data.get("onsiteObservation")
     if observation is not None:
         if not isinstance(observation, dict):
@@ -138,13 +136,13 @@ def derive_parameters(scene, plant, location, environment, weights, versions):
     if scene["configVersion"] == "2.0":
         config["targetDeviceId"] = scene["targetDeviceId"]
         config["params"]["minWaterIntervalSeconds"] = int(seasonal_days * 86400)
-    warnings = ["这是初始建议值，启用长期运行前请完成土壤和水泵实物标定",
+    warnings = ["这是初始建议值，启用长期运行前请核对传感器读数和实际出水",
                 "续航指水箱按估算日需水量可支持的天数，不包含电池与太阳能供电续航",
                 "季节间隔用于本次水量估算；设备实际浇水仍受传感器及安全保护约束"]
     if scene["configVersion"] == "1.0":
         warnings.append("当前配置没有固件可执行的最短浇水间隔字段")
     else:
-        warnings.append("最短浇水间隔已写入控制参数；自动运行须由已标定且支持 2.0 配置的固件执行")
+        warnings.append("最短浇水间隔已写入控制参数；自动运行须由支持 2.0 配置的固件执行，并通过传感器及运行保护检查")
     review = plant.get("review", {}).get("status", "engineering")
     validation = plant.get("fieldValidation", {}).get("status", "untested")
     if review == "engineering":
@@ -196,7 +194,7 @@ def derive_parameters(scene, plant, location, environment, weights, versions):
         f"温度系数 {temperature:.2f}、空气湿度系数 {humidity:.2f}；计算输入来自" + ("用户选择的设备准备期报告" if measured else " Open-Meteo"),
         f"土壤／温度／空气权重归一化为 {normalized[0]:.2f}／{normalized[1]:.2f}／{normalized[2]:.2f}",
         f"每轮 {pulses} 次，每次开泵 3 秒、间隔 25 秒；按 {scene['flowRateMlSec']} mL/s 估算单轮水量",
-        "设备固定无人值守，触发阈值增加 3；首次配置推荐先进入 PREPARE 校准",
+        "设备固定无人值守，触发阈值增加 3；首次配置推荐先进入 PREPARE 采样",
         "降水、海拔与日照用于环境说明；未将短期预报当作长期气候或直接替代雨量传感器"
     ]
     evidence = plant.get("evidence", {})

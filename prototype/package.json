@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/protocol.test.mjs",
+    "test": "node --test tests/protocol.test.mjs tests/connection-session.test.mjs",
+    "test:device-reload": "node tests/device-reload.test.cjs",
     "test:browser": "node tests/browser.test.cjs",
     "test:locations": "node tests/browser-locations.test.cjs",
     "browser:install": "playwright install chromium"

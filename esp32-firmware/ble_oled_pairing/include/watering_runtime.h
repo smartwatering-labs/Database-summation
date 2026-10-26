@@ -4,31 +4,13 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include "board_parameters.h"
 
 namespace sws {
 struct RuntimeConfig {
   double soilWeight=.6,tempWeight=.3,airWeight=.1,threshold=50;
   uint32_t pulses=0,onMs=0,offMs=0,intervalSeconds=0,revision=0;
   bool bound=false;
-};
-struct Calibration {
-  bool verified=false;
-  int soilWet=0,soilDry=0,soilMin=0,soilMax=4095,rainMin=0,rainMax=4095,rainThreshold=0;
-  bool rainWetBelow=true;
-  bool allowAirFallback=false;
-  double flowMlSec=0,solarDivider=.2;
-  uint32_t settleMs=2000,dhtIntervalMs=2000,servoMoveMs=500;
-  int dhtModel=11,servoParkUs=1500,servoWipeUs=1500;
-  bool valid()const {
-    return verified&&std::abs(soilDry-soilWet)>=100&&soilMin>=0&&soilMax<=4095&&soilMin<soilMax
-      &&soilWet>=soilMin&&soilWet<=soilMax&&soilDry>=soilMin&&soilDry<=soilMax
-      &&rainMin>=0&&rainMax<=4095&&rainMin<rainThreshold&&rainThreshold<rainMax
-      &&std::isfinite(flowMlSec)&&flowMlSec>=1&&flowMlSec<=200
-      &&std::isfinite(solarDivider)&&solarDivider>.05&&solarDivider<=1
-      &&settleMs>=500&&settleMs<=10000&&dhtIntervalMs>=2000&&dhtIntervalMs<=60000
-      &&(dhtModel==11||dhtModel==22)&&servoParkUs>=500&&servoParkUs<=2500
-      &&servoWipeUs>=500&&servoWipeUs<=2500&&servoMoveMs>=100&&servoMoveMs<=5000;
-  }
 };
 struct SensorReading {
   double temperature=NAN,humidity=NAN,solar=NAN;
@@ -56,7 +38,6 @@ struct RuntimeIO {
 class WateringRuntime {
   RuntimeIO& io;
   RuntimeConfig cfg;
-  Calibration cal;
   SensorReading latest;
   uint32_t lastSampleMs=0,phaseAt=0,roundAt=0,prepareAt=0,pulse=0,lastTick=0;
   uint64_t elapsedMs=0,eligibleMs=0;
@@ -66,7 +47,7 @@ class WateringRuntime {
   std::array<ChannelStats,5> prepareStats{};
   std::array<double,5> baselineValues{{NAN,NAN,NAN,NAN,NAN}};
   uint32_t validSamples=0,totalSamples=0;
-  std::string mode="DISPLAY",reason="calibration-required";
+  std::string mode="DISPLAY",reason="sample-stale";
   static double clamp(double x,double lo,double hi){return std::max(lo,std::min(hi,x));}
   void off(){io.pump(false);pumpOn=false;}
   void finish(const char* code){off();phase=Idle;eligibleMs=elapsedMs+uint64_t(cfg.intervalSeconds)*1000;
@@ -75,7 +56,7 @@ class WateringRuntime {
 public:
   explicit WateringRuntime(RuntimeIO& port):io(port){off();}
   bool active()const{return phase!=Idle;}
-  bool automaticReady()const{return cal.valid()&&cfg.bound&&cfg.intervalSeconds>=3600&&storageReady&&clockReady;}
+  bool automaticReady()const{return cfg.bound&&cfg.intervalSeconds>=3600&&storageReady&&clockReady;}
   const std::string& currentMode()const{return mode;}
   const std::string& inhibition()const{return reason;}
   const SensorReading& sample()const{return latest;}
@@ -101,7 +82,6 @@ public:
     if(!restoring){prepared=false;baselineValues.fill(NAN);prepareStats={};}
     if(eligibleMs==UINT64_MAX&&clockReady&&cfg.intervalSeconds>=3600)eligibleMs=elapsedMs+uint64_t(cfg.intervalSeconds)*1000;
     if(!restoring)eligibleMs=std::max(eligibleMs,elapsedMs+uint64_t(cfg.intervalSeconds)*1000);return true;}
-  bool calibrate(const Calibration& value){if(active()||!value.valid())return false;cal=value;prepared=false;baselineValues.fill(NAN);return true;}
   void clock(bool trusted){clockReady=trusted;if(trusted&&eligibleMs==UINT64_MAX&&cfg.intervalSeconds>=3600)eligibleMs=elapsedMs+uint64_t(cfg.intervalSeconds)*1000;}
   bool setMode(const std::string& target,uint32_t now){
     if(target!="DISPLAY"&&target!="PREPARE"&&target!="LONGRUN")return false;
@@ -110,14 +90,14 @@ public:
     if(target=="PREPARE"){prepareAt=now;prepared=false;baselineValues.fill(NAN);validSamples=totalSamples=0;temperatureSum=humiditySum=soilSum=0;prepareStats={};io.runtimeEvent("prepare-started","准备期采样，水泵保持关闭");}
     return true;
   }
-  bool soilValid()const{return cal.valid()&&latest.soil>=cal.soilMin&&latest.soil<=cal.soilMax;}
-  bool rainValid()const{return cal.valid()&&latest.rain>=cal.rainMin&&latest.rain<=cal.rainMax;}
+  bool soilValid()const{return latest.soil>=SENSOR_ADC_MIN&&latest.soil<=SENSOR_ADC_MAX;}
+  bool rainValid()const{return latest.rain>=SENSOR_ADC_MIN&&latest.rain<=SENSOR_ADC_MAX;}
   bool airValid()const{return std::isfinite(latest.temperature)&&latest.temperature>=-20&&latest.temperature<=60
     &&std::isfinite(latest.humidity)&&latest.humidity>=0&&latest.humidity<=100;}
-  bool raining()const{return rainValid()&&(cal.rainWetBelow?latest.rain<cal.rainThreshold:latest.rain>cal.rainThreshold);}
+  bool raining()const{return rainValid()&&(RAIN_WET_BELOW?latest.rain<RAIN_THRESHOLD:latest.rain>RAIN_THRESHOLD);}
   double demand()const{
     if(!soilValid()||!rainValid()||!airValid())return NAN;if(raining())return 0;
-    double dryness=clamp(100.*(latest.soil-cal.soilWet)/(cal.soilDry-cal.soilWet),0,100);
+    double dryness=clamp(100.*latest.soil/4095.,0,100);
     double base=std::isfinite(baseline())?std::max(28.,baseline()):28.;
     return clamp(dryness*cfg.soilWeight+clamp((latest.temperature-base)*100/12,0,100)*cfg.tempWeight
       +(100-latest.humidity)*cfg.airWeight+5,0,100);
@@ -134,18 +114,18 @@ public:
       validSamples++;temperatureSum+=latest.temperature;humiditySum+=latest.humidity;soilSum+=latest.soil;}}
   }
   void stop(){stopped=true;if(active())finish("watering-stopped");else off();mode="DISPLAY";reason="operator-stop";}
-  void reset(){stop();cfg=RuntimeConfig{};cal=Calibration{};clockReady=false;eligibleMs=0;samplePresent=false;prepared=false;baselineValues.fill(NAN);prepareStats={};}
+  void reset(){stop();cfg=RuntimeConfig{};clockReady=false;eligibleMs=0;samplePresent=false;prepared=false;baselineValues.fill(NAN);prepareStats={};}
   void tick(uint32_t now){
     elapsedMs+=uint32_t(now-lastTick);lastTick=now;
     if(mode=="PREPARE"&&uint32_t(now-prepareAt)>=600000){
       if(validSamples>=10&&double(validSamples)/std::max<uint32_t>(1,totalSamples)>=.8){
         for(size_t i=0;i<baselineValues.size();i++)baselineValues[i]=prepareStats[i].mean();
         prepared=true;io.runtimeEvent("prepare-completed","有效样本达到要求；基准已建立");}
-      else io.runtimeEvent("prepare-insufficient","有效样本不足，请检查接线和标定后重新准备");
+      else io.runtimeEvent("prepare-insufficient","有效样本不足，请检查供电和接线后重新准备");
       mode="DISPLAY";off();return;
     }
     bool recent=samplePresent&&uint32_t(now-lastSampleMs)<=30000;
-    if(!storageReady)reason="storage-unavailable";else if(!cal.valid())reason="calibration-required";
+    if(!storageReady)reason="storage-unavailable";
     else if(!cfg.bound)reason="bound-config-required";else if(!clockReady)reason="time-untrusted";
     else if(!recent)reason="sample-stale";else if(!soilValid())reason="soil-invalid";
     else if(!rainValid())reason="rain-invalid";else if(!airValid())reason="air-invalid";

@@ -49,7 +49,7 @@ GATT 写响应不等于配置保存。配置发送结果未知时，重新连接
 
 ## 握手与认证
 
-1. `handshake` 返回协议、型号、设备 ID、版本、nonce、transport、runtimeProfile、supportedModes、automaticWatering、authProfile 和 capabilities。3.7.0 增加逐通道准备期摘要、五态质量、时间探测与角色授权；LONGRUN 在标定、配置、存储和时间前置就绪时出现。
+1. `handshake` 返回协议、型号、设备 ID、版本、nonce、transport、runtimeProfile、supportedModes、automaticWatering、authProfile 和 capabilities。3.9.0 提供直接采样、逐通道准备期摘要、质量状态、时间探测与角色授权；LONGRUN 在配置、存储和时间前置就绪时出现。
 2. 网页验证设备身份、型号和固件版本不低于 3.3。同一连接中设备 ID 改变会停止操作。
 3. 开发认证：小写十六进制 SHA-256(nonce + `SWS2026C3`)；`authenticate` payload 为 `{auth}`。
 4. 固件随机 nonce 有效 **30 秒**，成功或失败尝试均消费 nonce；成功返回 `{authenticated:true}`。断开或重新握手清除认证。
@@ -70,19 +70,21 @@ GATT 写响应不等于配置保存。配置发送结果未知时，重新连接
 | prepareOperation | `{operation:"mode",mode:"PREPARE"}` 或 operation=`restart`/`factoryReset` | `{confirmationToken,expiresInSeconds:30}` |
 | confirmOperation | `{confirmationToken}` | `{confirmed:true,mode}`；执行已绑定的操作 |
 | manualServo | `{}` | `{started:true,durationMs}`；按实测端点执行一次舵机往返 |
-| manualPump | `{on:true}` / `{on:false}` | `{pumpOn,maxRunSeconds:30}`；GPIO7 开泵或关泵 |
+| manualPump | `{on:true}` / `{on:false}` | `{pumpOn,maxRunSeconds:30}`；GPIO7 低电平开泵、高电平关泵 |
 
-设备的 sample 携带 bootCount、sampleSeq、sampledAt、lastSyncAt、timeQuality、通道 quality、温湿度、土壤/雨量 ADC、太阳能电压与需求值；无效数值为 null。quality.status 为 valid / suspect / invalid / stale / unconfigured，包含连续失败数、跳变数及最近有效采样时间。history / events 按游标和实际 UTF-8 大小分页，最大 24 条。status 同时返回 authorizationRole、lastSyncAt、calibrationReady、controlState、controlInhibition、间隔剩余秒数、prepareSummary 和 quickCheck。prepareSummary.channels 含逐通道有效/失败次数、均值、极值、最大单次变化及采样区间，baseline 保存各通道基准。偏离事件携带 referenceMin/referenceMax、observedSummary 和恢复值。
+设备的 sample 携带 bootCount、sampleSeq、sampledAt、lastSyncAt、timeQuality、通道 quality、温湿度、土壤/雨量 ADC、太阳能电压与需求值；DHT 读取失败时为 null，ADC 异常值仍输出。quality.status 为 valid / suspect / invalid，包含连续失败数、跳变数及最近有效采样时间。history / events 按游标和实际 UTF-8 大小分页，最大 24 条。status 同时返回 authorizationRole、lastSyncAt、sensorState、controlState、controlInhibition、间隔剩余秒数、prepareSummary 和 quickCheck。prepareSummary.channels 含逐通道有效/失败次数、均值、极值、最大单次变化及采样区间，baseline 保存各通道基准。偏离事件携带 referenceMin/referenceMax、observedSummary 和恢复值。
 
-sample 另提供不参与控制的原始诊断字段：rawTemperatureC、rawHumidityPct（DHT 直接读取失败时为 null）、rawSoilAdc、rawRainAdc、solarAdcMilliVolts。它们在未标定时仍可用于查看输入；网页将其与通过质量检查的采样值分开显示。
+3.9.0 的 sample 主字段 temperatureC、humidityPct、soilAdc、rainAdc 直接输出传感器读数；DHT 读取失败时为 null，ADC 保留完整 0–4095 范围。solarAdcMilliVolts 是太阳能 ADC 端电压，单位 mV；solarVoltageV 按板级分压比例换算。rawTemperatureC、rawHumidityPct、rawSoilAdc、rawRainAdc 保留为兼容字段。网页优先显示直接读数，历史记录也保留这些数值。quality 报告异常而不清空显示值，wateringDemand 和自动控制继续使用通过保护检查的数据。
 
 syncTime 可请求 epochSeconds，或 sentAtEpochMs 与 estimatedOneWayMs；timeProbe 供网页测量一次 BLE 往返，设备返回 uptime 与时间可信状态。quickCheck 在 DISPLAY 开始三轮检查，可传 stimulatedSensorKey 并由操作人立即改变对应输入，以识别持续不变的通道。stop 关闭执行器并确认 stopped。独立 GATT 字节 ! 中断传输并返回 id=emergency-stop 的停止回执。密钥设备的双向认证、角色权限及消息封装见 prototype/docs/device-authentication.md。
 
-3.8.0 握手声明 `manual-control`。手动命令须完成认证，仅 owner / operator 可执行；在 DISPLAY 模式执行，舵机要求实测标定且不能与水泵同时运行。status 增加 `manualPumpOn` 与 `servoBusy`，网页据设备状态显示按钮。水泵开启最多 30 秒，超时、BLE 断开、模式切换及停止操作均关泵；设备拒绝缺失布尔值的开关命令。旧固件未声明此能力时网页禁用按钮。
+3.9.0 握手声明 `manual-control`。手动命令须完成认证，仅 owner / operator 可执行；在 DISPLAY 模式执行，舵机按固定脉宽往返，不能与水泵同时运行。status 增加 `manualPumpOn` 与 `servoBusy`，网页据设备状态显示按钮。水泵开启最多 30 秒，超时、BLE 断开、模式切换及停止操作均关泵；设备拒绝缺失布尔值的开关命令。旧固件未声明此能力时网页禁用按钮。
 
 manualPump 的 pumpOn 与 status.manualPumpOn 是控制命令状态；设备没有水泵电流或出水反馈，网页不据此宣称实物已运行。
 
-二次确认令牌绑定当前会话与操作，30 秒内单次使用；错误令牌、重新握手和断线使其失效。DISPLAY 和 PREPARE 保持在线；LONGRUN 在运行前置就绪时接受，断开 BLE 后按采样与脉冲流程进入深睡。恢复出厂清除业务配置、标定和运行记录，保留身份；重启操作先发最终回执，再执行重启，回执丢失时重连核对。
+每次水泵输出命令同时打印串口 `PUMPSTATUS`，包含 `source`、`firmware`、`pin`、`on`、`commandedLevel`、`pinLevel`、`activeLevel` 和 `initialized`。串口命令 `PUMPSTATUS` 只读查询当前 GPIO 状态，不切换水泵。`pinLevel` 是 ESP32 引脚的逻辑回读，不属于电机运行反馈；BLE 回执仍使用命令状态。
+
+二次确认令牌绑定当前会话与操作，30 秒内单次使用；错误令牌、重新握手和断线使其失效。DISPLAY 和 PREPARE 保持在线；LONGRUN 在运行前置就绪时接受，断开 BLE 后按采样与脉冲流程进入深睡。恢复出厂清除业务配置和运行记录，保留身份；重启操作先发最终回执，再执行重启，回执丢失时重连核对。
 
 ## 配置校验与持久化
 

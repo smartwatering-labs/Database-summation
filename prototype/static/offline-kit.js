@@ -56,7 +56,7 @@ byId('connect').addEventListener('click',async()=>{
   try{message('正在连接并读取设备状态…');await device.connect(settings);message(`已连接 ${device.status.deviceId}，当前 R${device.status.configRevision}。`);}
   catch(error){message(error.message,true);}finally{update();}
 });
-byId('disconnect').addEventListener('click',()=>{device.disconnect();message('设备已断开。');update();});
+byId('disconnect').addEventListener('click',()=>{device.disconnect('',{forget:true});message('设备已断开。');update();});
 byId('upload').addEventListener('click',async()=>{
   try{
     if(!config||device.state!=='ready')throw new Error('请先导入配置并连接设备');

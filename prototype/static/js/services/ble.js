@@ -71,19 +71,28 @@ export class BleTransport {
     catch(error){const pending=this.pending.get('emergency-stop');if(pending){clearTimeout(pending.timer);this.pending.delete('emergency-stop');pending.reject(error);}throw error;}
     finally{this.stopRequested=false;this.configureSecurity(null);}
   }
-  connect() {
+  connect(rememberedDeviceId) {
     if (this.opening) return this.opening;
     this.setupAbort = new AbortController();
     const signal = this.setupAbort.signal;
-    this.opening = this.open(signal).finally(() => { this.opening = null; });
+    this.opening = this.open(signal, rememberedDeviceId).finally(() => { this.opening = null; });
     return this.opening;
   }
-  async open(signal) {
+  async open(signal, rememberedDeviceId) {
     if (!globalThis.isSecureContext || !navigator.bluetooth) throw new Error('当前环境无法使用 Web Bluetooth，请用支持该功能的浏览器访问 localhost 或 HTTPS');
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     for (const key of ['serviceUuid', 'writeUuid', 'notifyUuid']) if (!uuid.test(this.settings[key] || '')) throw new Error('尚未设置实际 BLE UUID请在连接设置中填写固件服务及特征 UUID');
-    this.onConnectionPhase('choosing');
-    const selected = await navigator.bluetooth.requestDevice({ filters: [{ services: [this.settings.serviceUuid] }] });
+    let selected;
+    if (rememberedDeviceId) {
+      this.onConnectionPhase('restoring');
+      if (typeof navigator.bluetooth.getDevices !== 'function') throw new Error('当前浏览器未开放蓝牙自动恢复，请点击“连接设备”重新选择设备');
+      const permitted = await waitForSetup(navigator.bluetooth.getDevices(), signal, 10000);
+      selected = permitted.find(device => device.id === rememberedDeviceId);
+      if (!selected) throw new Error('未找到上次设备的蓝牙授权，请重新选择设备');
+    } else {
+      this.onConnectionPhase('choosing');
+      selected = await navigator.bluetooth.requestDevice({ filters: [{ services: [this.settings.serviceUuid] }] });
+    }
     if (signal.aborted) throw cancelledConnection();
     const key = selected.id || selected;
     const connection = connections.get(key) || { owner: null, pending: null };

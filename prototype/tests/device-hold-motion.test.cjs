@@ -94,7 +94,7 @@ async function assertEqualButtonSizes(page) {
 
     await page.locator('#target-mode').selectOption('PREPARE');
     await mode.click();
-    await page.waitForFunction(() => document.querySelector('[data-current-mode]')?.textContent.includes('准备 / 校准'));
+    await page.waitForFunction(() => document.querySelector('[data-current-mode]')?.textContent.includes('准备 / 采样'));
     assert.equal(await page.locator('#dialog').evaluate(node => node.open), false);
 
     await read.click();
