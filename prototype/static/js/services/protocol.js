@@ -138,6 +138,12 @@ export function validateStatus(value, deviceId) {
       if (key === 'solarVoltageV' && s[key] === undefined) continue;
       if (s[key] !== null && (typeof s[key] !== 'number' || !Number.isFinite(s[key]) || s[key] < min || s[key] > max)) throw new Error('设备采样数据无效：' + key);
     }
+    for (const [key, min, max] of [['rawTemperatureC', -20, 60], ['rawHumidityPct', 0, 100], ['rawSoilAdc', 0, 4095], ['rawRainAdc', 0, 4095], ['solarAdcMilliVolts', 0, 5000]]) {
+      if (s[key] == null) continue;
+      const adcValue = key === 'rawSoilAdc' || key === 'rawRainAdc' || key === 'solarAdcMilliVolts';
+      if (typeof s[key] !== 'number' || !Number.isFinite(s[key]) || s[key] < min || s[key] > max
+          || (adcValue && !Number.isInteger(s[key]))) throw new Error('设备原始采样数据无效：' + key);
+    }
     if (s.sampleSeq != null && (!Number.isInteger(s.sampleSeq) || s.sampleSeq < 0 || !Number.isInteger(s.bootCount) || s.bootCount < 0)) throw new Error('采样身份无效');
     if (s.timeQuality != null && !['trusted', 'relative', 'unknown'].includes(s.timeQuality)) throw new Error('采样时间质量无效');
     if (s.quality != null) {

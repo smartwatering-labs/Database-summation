@@ -111,6 +111,7 @@ class BoardRuntime:public sws::RuntimeIO {
   void finishSample(uint32_t now){
     bool firstSample=!sampleDone;
     digitalWrite(SWS_SENSOR_POWER_PIN,LOW);pinMode(SWS_DHT_PIN,INPUT);acquisition=0;sampleAt=now;sampleDone=true;
+    const double rawTemperature=temperature,rawHumidity=humidity;
     sws::SensorReading s;s.temperature=temperature;s.humidity=humidity;s.soil=median(soil);s.rain=median(rain);
     int millivolts=median(solar);s.solar=calibration.valid()&&millivolts<2500?millivolts/1000./calibration.solarDivider:NAN;s.sequence=++seq;
     bool directAir=std::isfinite(s.temperature)&&std::isfinite(s.humidity);
@@ -137,6 +138,8 @@ class BoardRuntime:public sws::RuntimeIO {
     row["bootCount"]=boot;row["sampleSeq"]=seq;row["sampledAt"]=epochTime();row["timeQuality"]=clockTrusted?"trusted":"relative";
     if(lastSyncAt>0)row["lastSyncAt"]=lastSyncAt;else row["lastSyncAt"]=nullptr;
     row["rawSoilAdc"]=rawSoil;row["rawRainAdc"]=rawRain;
+    if(std::isfinite(rawTemperature))row["rawTemperatureC"]=rawTemperature;else row["rawTemperatureC"]=nullptr;
+    if(std::isfinite(rawHumidity))row["rawHumidityPct"]=rawHumidity;else row["rawHumidityPct"]=nullptr;
     if(std::isfinite(s.temperature))row["temperatureC"]=s.temperature;else row["temperatureC"]=nullptr;
     if(std::isfinite(s.humidity))row["humidityPct"]=s.humidity;else row["humidityPct"]=nullptr;
     if(s.soil>=0)row["soilAdc"]=s.soil;else row["soilAdc"]=nullptr;

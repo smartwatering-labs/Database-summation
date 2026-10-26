@@ -411,7 +411,7 @@ const actions={
   'manual-pump':async()=>{
     const on=device.status?.manualPumpOn!==true;
     await device.manualPump(on);
-    toast(on?'水泵已打开，30 秒后自动关闭':'水泵已关闭');
+    toast(on?'设备已确认开泵命令，实际出水未检测':'设备已确认关泵命令');
   },
   'use-device-observation':async()=>{await device.refresh();state.scene.deviceObservation=device.observationReport();state.dirty=!!state.result;render();toast('已选择设备准备期温湿度作为本次生成输入');},
   'clear-device-observation':()=>{state.scene.deviceObservation=null;state.dirty=!!state.result;render();},

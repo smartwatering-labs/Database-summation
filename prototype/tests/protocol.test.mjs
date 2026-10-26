@@ -323,6 +323,23 @@ test('sample quality suppresses invalid soil trend points and event pages retain
   controller.disconnect();
 });
 
+test('uncalibrated readings show raw diagnostics without treating them as valid samples',async()=>{
+  const controller=new DeviceController();await controller.connect({},true);controller.transport.latency=0;
+  const sample={...controller.status.sample,sampleSeq:101,temperatureC:null,humidityPct:null,soilAdc:null,rainAdc:null,solarVoltageV:null,wateringDemand:null,
+    rawTemperatureC:25,rawHumidityPct:54,rawSoilAdc:3,rawRainAdc:4,solarAdcMilliVolts:206,
+    quality:Object.fromEntries(['temperatureC','humidityPct','soilAdc','rainAdc','solarVoltageV'].map(key=>[key,{status:'unconfigured',reason:'calibration-required'}]))};
+  controller.status=validateStatus({...controller.status,calibrationReady:false,manualPumpOn:true,sample},controller.status.deviceId);
+  const trendLength=controller.trend.length;controller.record();
+  assert.equal(controller.trend.length,trendLength);
+  const html=devicePage({settings:{}},controller);
+  assert.match(html,/土壤原始 ADC<\/span><strong>3/);
+  assert.match(html,/雨量原始 ADC<\/span><strong>4/);
+  assert.match(html,/温度直接读数<\/span><strong>25/);
+  assert.match(html,/设备已确认开泵命令；未检测实际出水/);
+  assert.throws(()=>validateStatus({...controller.status,sample:{...sample,rawSoilAdc:4096}},controller.status.deviceId),/原始采样数据无效/);
+  controller.disconnect();
+});
+
 test('a late status response cannot replace a newer connection',async()=>{
   const controller=new DeviceController();await controller.connect({},true);controller.transport.latency=0;
   const transport=controller.transport,request=transport.request.bind(transport);
