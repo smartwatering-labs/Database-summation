@@ -1,4 +1,4 @@
-import { button, escape as e, pageTitle, notice, metric, modes, timestamp, icon } from '../ui.js';
+import { button, escape as e, pageTitle, notice, metric, modes, timestamp, icon, connectionPhases } from '../ui.js';
 
 function age(value) {
   if (!value) return '时间未知';
@@ -9,6 +9,9 @@ function age(value) {
 }
 
 const channelNames={temperatureC:'温度',humidityPct:'空气湿度',soilAdc:'土壤',rainAdc:'雨量',solarVoltageV:'太阳能输入'};
+function holdButton(label,action,{disabled=false}={}){
+  return `<button type="button" class="button danger device-hold" data-action="${action}" data-device-hold ${disabled?'disabled':''}><span class="device-hold-content">${e(label)}</span><span class="device-hold-fill" aria-hidden="true"><span class="device-hold-fill-content">${e(label)}</span></span></button>`;
+}
 const qualityNames={valid:'有效',suspect:'疑似异常',stale:'近期替代值',invalid:'无效',unconfigured:'未配置',missing:'缺少读数'};
 const qualityReasons={'recent-valid-fallback':'使用近期有效读数','read-failed':'读取失败','out-of-range':'超出有效范围','out-of-range-or-jump':'超范围或读数突变','stuck-after-stimulus':'主动改变输入后三次读数未变化','sensor-supply-suspected':'检查共用传感器供电与接线','voltage-out-of-range':'输入电压超出量程','calibration-required':'等待分压与传感器标定'};
 const severityNames={info:'信息',warning:'注意',critical:'严重'};
@@ -26,8 +29,11 @@ function qualitySummary(sample) {
 
 export function devicePage(state, device) {
   const ready = device.state === 'ready';
+  const phase = connectionPhases[device.connectionPhase];
+  const failedPhase = connectionPhases[device.connectionFailurePhase];
   if (!ready) return `${pageTitle('硬件情况查看', '连接并完成握手后，查看设备当前状态与最近一周采样')}
-    <section class="empty-state device-empty"><span class="preview-icon">${icon('bluetooth',36)}</span><h2>${device.busy ? '正在连接设备' : '等待连接浇水设备'}</h2><p>${e(device.error || '尚未取得设备数据；请给设备供电，等待定时唤醒后再连接蓝牙')}</p><div class="actions">${button('连接设备','connect',{type:'primary',disabled:device.busy})}${state.settings.demoEnabled ? button('体验模拟设备','demo',{type:'outline',disabled:device.busy}) : ''}</div></section>
+    <section class="empty-state device-empty"><span class="preview-icon">${icon('bluetooth',36)}</span><h2>${e(phase?.[0] || (device.busy ? '正在连接设备' : '等待连接浇水设备'))}</h2><p>${e(device.error || phase?.[1] || '尚未取得设备数据；请给设备供电，等待定时唤醒后再连接蓝牙')}</p><div class="actions">${device.busy?button('取消连接','disconnect',{type:'outline'}):button('连接设备','connect',{type:'primary'})}${!device.busy&&state.settings.demoEnabled ? button('体验模拟设备','demo',{type:'outline'}) : ''}</div></section>
+    ${failedPhase?`<p class="caption muted">连接停止于：${e(failedPhase[0])}</p>`:''}
     ${device.pendingWrite ? notice(`R${e(device.pendingWrite.config.revision)} 写入结果待核对。请连接原设备 ${e(device.pendingWrite.deviceId)}，读回配置后再发送。`,'warning') : ''}
     `;
   const data = device.status, sample = data.sample;
@@ -38,6 +44,12 @@ export function devicePage(state, device) {
   const rows = [...records].reverse().slice(page * 12, page * 12 + 12);
   const events=device.events||[], eventPage=Math.min(state.eventsPage||0,Math.max(0,Math.ceil(events.length/8)-1));
   const eventRows=[...events].reverse().slice(eventPage*8,eventPage*8+8);
+  const manualAvailable=device.handshake.capabilities?.includes('manual-control');
+  const manualReady=manualAvailable&&canControl&&data.mode==='DISPLAY'&&!device.busy;
+  const manualSection=`<section class="history-section manual-control"><div class="section-heading"><div><h2>手动控制</h2><p class="small muted">点击按钮以控制舵机和水泵</p></div><div class="actions">
+    ${button('控制舵机','manual-servo',{type:'outline',disabled:!manualReady||data.calibrationReady!==true||data.manualPumpOn||data.servoBusy})}
+    ${button(data.manualPumpOn?'关闭水泵':'打开水泵','manual-pump',{type:data.manualPumpOn?'danger':'outline',disabled:!manualReady||data.servoBusy,extra:`aria-pressed="${data.manualPumpOn===true}"`})}
+    </div></div>${!manualAvailable?'<p class="caption muted">当前固件未提供手动控制，请更新固件后重新连接</p>':data.manualPumpOn?'<p class="caption muted" role="status">水泵已打开，30 秒后自动关闭；断开连接也会关闭</p>':data.calibrationReady!==true?'<p class="caption muted">控制舵机前需完成实物标定</p>':''}</section>`;
   const eventSection=device.handshake.capabilities?.includes('events') ? `<section class="history-section"><div class="section-heading"><div><h2>设备事件</h2><p class="small muted">事件由设备记录，恢复状态以设备复测为准</p></div>${button(state.eventsOpen?'重新读取事件':'读取设备事件','events',{type:'outline',symbol:'download',disabled:device.busy})}</div>
     ${state.eventsLoading?'<p role="status">正在读取设备事件…</p>':''}
      ${state.eventsOpen&&!state.eventsLoading?(eventRows.length?`<div class="table-scroll"><table><thead><tr><th>发生时间</th><th>级别</th><th>事件 / 通道</th><th>依据</th><th>控制影响</th><th>恢复</th></tr></thead><tbody>${eventRows.map(item=>`<tr><td>${e(timestamp(item.occurredAt,item.bootCount))}</td><td>${e(severityNames[item.severity])}</td><td>${e(item.code)}${item.sensorKey?` · ${e(channelNames[item.sensorKey])}`:''}</td><td>${e(eventEvidence(item)||'—')}</td><td>${e(item.controlImpact||'见设备状态')}</td><td>${item.recoveredAt!=null?e(timestamp(item.recoveredAt,item.bootCount)):item.severity==='info'?'—':'待复测'}</td></tr>`).join('')}</tbody></table></div><div class="pagination"><span>第 ${eventPage+1} / ${Math.ceil(events.length/8)} 页</span><div class="actions">${button('上一页','events-prev',{type:'outline',disabled:eventPage===0})}${button('下一页','events-next',{type:'outline',disabled:(eventPage+1)*8>=events.length})}</div></div>`:'<div class="empty-state compact"><p>设备暂无事件记录</p></div>'):'<p class="caption muted">按需读取设备本地事件，不持续占用蓝牙链路</p>'}</section>` : '';
@@ -54,9 +66,9 @@ export function devicePage(state, device) {
     ${device.handshake.capabilities?.includes('emergency-stop')?`<div class="field-row"><div class="field-label">停止浇水</div>${button('立即停泵','stop-watering',{type:'danger',disabled:device.stopping})}</div>`:''}
     <div class="field-row"><div class="field-label">当前模式</div><strong data-current-mode>${e(modes[data.mode])}</strong></div>
      <div class="field-row"><div class="field-label"><label for="target-mode">切换模式</label></div><div class="inline-control"><select id="target-mode" aria-label="目标模式" ${device.busy||!canControl ? 'disabled' : ''}>${Object.entries(modes).filter(([value])=>supportedModes.includes(value)).map(([value,label])=>`<option value="${e(value)}" ${value===data.mode?'selected':''}>${e(label)}</option>`).join('')}</select>${button('应用','mode',{type:'outline',disabled:device.busy||!canControl})}</div></div>
-    <div class="field-row"><div class="field-label">设备中的配置</div>${button('从设备读取','device-download',{type:'outline',symbol:'download',disabled:device.busy})}</div>
-     <div class="field-row"><div class="field-label">重新启动设备</div>${button('重启','restart',{type:'outline',disabled:device.busy||!canControl})}</div>
-     <div class="field-row"><div class="field-label">恢复出厂设置</div>${button('恢复出厂','factory-reset',{type:'danger',disabled:device.busy||!canManage})}</div>
+    <div class="field-row"><div class="field-label">设备中的配置</div>${button('从设备读取','device-download',{type:'outline',disabled:device.busy})}</div>
+     <div class="field-row"><div class="field-label">重新启动设备</div>${holdButton('重启','restart',{disabled:device.busy||!canControl})}</div>
+     <div class="field-row"><div class="field-label">恢复出厂设置</div>${holdButton('恢复出厂','factory-reset',{disabled:device.busy||!canManage})}</div>
     </div><p class="caption muted">读取后的配置会在“个性化库编译”页面预览；新生成配置的发送按钮保留在该页面</p></section>
     ${data.prepareSummary?`<p class="caption muted">准备期有效样本 ${e(data.prepareSummary.validSamples??0)} / ${e(data.prepareSummary.totalSamples??0)} · 平均温度 ${e(data.prepareSummary.temperatureC??'—')} °C · 平均空气湿度 ${e(data.prepareSummary.humidityPct??'—')}%</p>`:''}
      ${data.prepareSummary?.channels?`<details class="caption muted"><summary>查看准备期各通道统计与基准</summary><div class="table-scroll"><table><thead><tr><th>通道</th><th>有效 / 失败</th><th>均值</th><th>最小 / 最大</th><th>最大单次变化</th><th>基准</th></tr></thead><tbody>${Object.entries(data.prepareSummary.channels).map(([key,item])=>`<tr><td>${e(channelNames[key]||key)}</td><td>${e(item.validSamples??0)} / ${e(item.failedSamples??0)}</td><td>${e(item.mean??'—')}</td><td>${e(item.min??'—')} / ${e(item.max??'—')}</td><td>${e(item.largestStep??'—')}</td><td>${e(data.prepareSummary.baseline?.[key]??'—')}</td></tr>`).join('')}</tbody></table></div></details>`:''}
@@ -65,6 +77,7 @@ export function devicePage(state, device) {
     ${sample ? `<div class="sensor-grid">${metric('空气温度',sample.temperatureC,'°C')}${metric('空气湿度',sample.humidityPct,'%')}${metric('土壤 ADC',sample.soilAdc)}${metric('雨量 ADC',sample.rainAdc)}${sample.solarVoltageV!==undefined?metric('太阳能输入',sample.solarVoltageV,'V'):''}${metric('浇水需求值',sample.wateringDemand,'/100')}</div>${qualitySummary(sample)?notice(e(qualitySummary(sample)),'warning'):''}` : notice(configurationOnly ? '这版固件不采集传感器数据，当前采样和历史记录为空' : '设备尚未提供有效采样；等待下次采样后刷新')}
     <p class="caption muted">ADC 为原始读数；土壤传感器尚需实测标定，不转换为未经标定的湿度百分比</p>
     <section class="chart-section"><div class="section-heading"><h2>浇水需求趋势</h2><span class="legend"><i></i>本次连接的采样</span></div><canvas id="demand-chart" class="chart" role="img" aria-label="本次连接期间的浇水需求值趋势，当前数值见上方数据区"></canvas><p class="caption muted">本图仅保留当前页面的数据，不上传后端；阈值以设备实际配置为准</p></section>
+    ${manualSection}
     ${eventSection}
     <section class="history-section"><div class="section-heading"><div><h2>近期数据查看</h2><p class="small muted">从设备分批读取最近一周记录</p></div>${button(state.historyOpen ? '重新读取' : '读取最近一周','history',{type:'outline',symbol:'download',disabled:device.busy})}</div>
     ${state.historyLoading ? '<p role="status">正在从设备分批读取历史记录…</p>' : ''}

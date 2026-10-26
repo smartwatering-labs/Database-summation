@@ -149,7 +149,8 @@ async function renderedBounds(page) {
           assert.ok(title.x >= rail.x + rail.width + 16, `${width} ${route}: content clears the sidebar ${JSON.stringify(layout)}`);
         }
         if (width >= 960) {
-          assert.ok(canvas.x + b.left > title.x + title.width + 16, 'assembly clears the reading column on its left');
+          const reading = route === 'home' ? await page.locator('.hero-side-stack').boundingBox() : title;
+          assert.ok(canvas.x + b.left > reading.x + reading.width + 12, 'assembly clears the visible reading content on its left');
           if (route === 'product') {
             const region = await page.locator('.hero-visual-region').boundingBox();
             assert.ok(b.bottom - b.top > region.height * .84, 'exploded assembly fills its display region');

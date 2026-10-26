@@ -28,6 +28,7 @@ NimBLEServer* server=nullptr;
 NimBLECharacteristic* notifier=nullptr;
 std::atomic<bool> linked{false},subscribed{false},rxOverflow{false};
 std::atomic<bool> immediateStop{false};
+std::atomic<bool> securityPending{false};
 std::atomic<uint32_t> epoch{0};
 std::atomic<uint16_t> peer{BLE_HS_CONN_HANDLE_NONE};
 struct RxChunk {uint32_t epoch;uint16_t size;uint8_t bytes[244];};
@@ -36,6 +37,9 @@ std::deque<std::string> tx;
 size_t txOffset=0,txBytes=0,rxCount=0,rxTotal=0;
 uint32_t lastEpoch=0,nextTx=0,txBlockedAt=0,stageAt=0,savedAt=0,lastDisplay=0,rebootAt=0;
 bool oledReady=false,rebootPending=false,hasSavedNotice=false;
+// A host keys its bond to the peer address, so a stale record can only be escaped by
+// publishing a new address. Bump this value to give the board a brand-new identity.
+constexpr uint8_t SWS_BLE_ADDR_SALT=0x5A;
 std::string stage="idle";
 size_t peerChunkBytes(){
   uint16_t mtu=server?server->getPeerMTU(peer.load()):23;
@@ -69,7 +73,30 @@ public:
     for(int i=0;i<32;i++)snprintf(result+i*2,3,"%02x",digest[i]);return result;
   }
   bool provision(const std::string& line){
+    if(line=="BONDS"){Serial.printf("BONDS %d\n",NimBLEDevice::getNumBonds());return true;}
+    if(line=="BONDCLEAR"){
+      if(!server){Serial.println("BLE_NOT_READY");return true;}
+      // A stale peer key stops Windows from pairing again until one side forgets
+      // it. Clear the device store, then pair once from a clean state.
+      if(NimBLEDevice::deleteAllBonds())Serial.println("BONDS_CLEARED reconnect_to_pair");
+      else Serial.println("BONDS_CLEAR_FAILED");
+      return true;
+    }
     if(line=="IDENTITY"){Serial.printf("IDENTITY %s %s\n",deviceIdentity.c_str(),authProfile());return true;}
+    if(line=="KEYCLEAR"){
+      if(!server){Serial.println("BLE_NOT_READY");return true;}
+      // Back to the development profile: no owner key means no link encryption and no
+      // pairing at all. Every peer key goes too, including a half-written record the
+      // BLE API refuses to delete, so nothing stale can shadow the next connection.
+      // Configuration, calibration and the history logs stay untouched.
+      bool cleared=identity.remove("key");
+      if(cleared)key.clear();
+      NimBLEDevice::deleteAllBonds();
+      Preferences bonds;
+      if(bonds.begin("nimble_bond",false)){bonds.clear();bonds.end();}
+      Serial.println(cleared?"KEY_CLEARED reboot_to_apply":"KEY_CLEAR_FAILED");
+      return true;
+    }
     if(line.rfind("AUTHSTATUS ",0)==0){std::string role=line.substr(11);
       if(role!="owner"&&role!="operator"&&role!="viewer")Serial.println("AUTH_INVALID");
       else Serial.printf("AUTHSTATUS %s %d\n",role.c_str(),hasRole(role)?1:0);
@@ -193,13 +220,28 @@ void drawDisplay(uint32_t now){
 
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* s,NimBLEConnInfo& info) override {
+    Serial.printf("BLE_CONNECTED handle=%u\n",info.getConnHandle());
+    // `linked` can outlive its link: a disconnect that reports another handle
+    // used to leave it set, which then rejected every later central. Reconcile
+    // with the controller before trusting the flag.
+    if(linked.load()&&s->getConnectedCount()<=1){linked=false;subscribed=false;peer=BLE_HS_CONN_HANDLE_NONE;}
     if(linked.exchange(true)){s->disconnect(info.getConnHandle());return;}
     peer=info.getConnHandle();subscribed=false;epoch.fetch_add(1);
+    // The write characteristic requires link encryption, and hosts do not pair just
+    // because a write is refused. Ask for security as soon as the link is up so the
+    // pairing finishes before the page writes its first packet.
+    securityPending=std::string(hardware.authProfile())=="hmac-sha256-v1";
     s->updateConnParams(info.getConnHandle(),12,24,0,500);
   }
-  void onDisconnect(NimBLEServer*,NimBLEConnInfo& info,int) override {
-    if(info.getConnHandle()!=peer.load())return;
+  void onDisconnect(NimBLEServer* s,NimBLEConnInfo& info,int reason) override {
+    Serial.printf("BLE_DISCONNECTED handle=%u reason=%d\n",info.getConnHandle(),reason);
+    // Only another live peer keeps the flag; a stale handle must clear it.
+    if(info.getConnHandle()!=peer.load()&&s->getConnectedCount())return;
     linked=false;subscribed=false;peer=BLE_HS_CONN_HANDLE_NONE;epoch.fetch_add(1);
+  }
+  void onAuthenticationComplete(NimBLEConnInfo& info) override {
+    Serial.printf("BLE_AUTH handle=%u encrypted=%d bonded=%d authenticated=%d\n",
+      info.getConnHandle(),info.isEncrypted(),info.isBonded(),info.isAuthenticated());
   }
 };
 class NotifyCallbacks : public NimBLECharacteristicCallbacks {
@@ -240,10 +282,26 @@ void setup(){
   Serial.printf("SWS %s device=%s OLED=%s I2C=%d/%d address=0x%02x\n",sws::FW_VERSION,id,oledReady?"found":"missing",SWS_OLED_SDA,SWS_OLED_SCL,SWS_OLED_ADDRESS);
   rxQueue=xQueueCreate(64,sizeof(RxChunk));if(!rxQueue){hardware.event("error");return;}
   if(!NimBLEDevice::init("SWS-ESP32C3")){Serial.println("BLE_INIT_FAILED");hardware.event("error");return;}
+  // A host keys its bond to the peer address, so one stale record in the computer
+  // shadows the link for good: it keeps encrypting with a key this device no longer
+  // has and hangs up (reason 0x13) before pairing can start. A fixed static random
+  // address derived from the chip MAC gives the board a stable identity that a stale
+  // record cannot shadow. The device ID is unchanged. Falls back to the public
+  // address when the controller rejects it, so advertising still works.
+  {
+    uint64_t mac=ESP.getEfuseMac();uint8_t own[6];
+    for(int i=0;i<6;i++)own[i]=uint8_t(mac>>(8*i));
+    own[0]^=SWS_BLE_ADDR_SALT;
+    own[5]=uint8_t(0xC0|(own[5]&0x3F));
+    if(NimBLEDevice::setOwnAddr(own)&&NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_RANDOM))
+      Serial.printf("BLE_ADDR %02x:%02x:%02x:%02x:%02x:%02x random-static\n",own[5],own[4],own[3],own[2],own[1],own[0]);
+    else Serial.println("BLE_ADDR public");
+  }
   if(std::string(hardware.authProfile())=="hmac-sha256-v1"){
     NimBLEDevice::setSecurityAuth(true,false,true);
     NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
   }
+  Serial.printf("BLE_SECURITY profile=%s bonds=%d\n",hardware.authProfile(),NimBLEDevice::getNumBonds());
   server=NimBLEDevice::createServer();server->setCallbacks(&serverCallbacks,false);
   auto* service=server->createService(SWS_SERVICE_UUID);
   auto* writer=service->createCharacteristic(SWS_WRITE_UUID,std::string(hardware.authProfile())=="hmac-sha256-v1"?
@@ -256,8 +314,13 @@ void setup(){
 void loop(){
   uint32_t now=millis(),currentEpoch=epoch.load();
   if(currentEpoch!=lastEpoch){lastEpoch=currentEpoch;receiver.reset();endpoint->resetSession();clearTx();rxCount=rxTotal=0;
+    if(!linked.load())boardRuntime.manualPumpOff("manual-pump-disconnected");
     hardware.event(linked.load()?"connected":"disconnected");if(!linked.load()&&server&&!rebootPending)NimBLEDevice::startAdvertising();}
   if(rxOverflow.exchange(false)){receiver.reset();clearTx();rxCount=rxTotal=0;hardware.event("error");terminateLink();}
+  if(securityPending.exchange(false)&&linked.load()&&peer.load()!=BLE_HS_CONN_HANDLE_NONE){
+    int securityRc=0;bool securityStarted=NimBLEDevice::startSecurity(peer.load(),&securityRc);
+    Serial.printf("BLE_SECURITY_REQUEST requested=%d rc=%d\n",securityStarted,securityRc);
+  }
   if(immediateStop.exchange(false)){
     boardRuntime.shutdown();receiver.reset();endpoint->resetSession();clearTx();rxCount=rxTotal=0;if(rxQueue)xQueueReset(rxQueue);
     JsonDocument reply;reply["id"]="emergency-stop";reply["protocol"]=sws::PROTOCOL;reply["protocolVersion"]=sws::VERSION;reply["status"]="ok";reply["payload"]["stopped"]=true;queueReply(reply);
@@ -266,6 +329,9 @@ void loop(){
   while(rxQueue&&processed++<8&&xQueueReceive(rxQueue,&chunk,0)==pdTRUE){
     if(chunk.epoch==lastEpoch&&linked.load())receiver.push(chunk.bytes,chunk.size,now);
   }
+  // A command handled above may start a pump or servo timer using millis().
+  // Refresh now before checking those timers so unsigned elapsed time cannot wrap.
+  now=millis();
   receiver.tick(now);sendNext(now);drawDisplay(now);
   boardRuntime.tick(now,linked.load(),tx.empty());
   if(rebootPending&&((tx.empty()&&uint32_t(now-rebootAt)>500)||uint32_t(now-rebootAt)>10000))ESP.restart();

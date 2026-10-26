@@ -12,8 +12,10 @@ import { home } from './pages/home.js';
 import { product } from './pages/product.js';
 import { configure, connectivityPanel, resultPanel, countryMatches, countryOptions } from './pages/configure.js';
 import { devicePage } from './pages/device.js';
-import { button, icon, escape as e, drawChart, modes } from './ui.js';
-import { getLanguage, setLanguage, localize, observeLanguage, translateText } from './i18n.js';
+import { button, icon, escape as e, drawChart, connectionPhases } from './ui.js';
+import { initDeviceHold } from './device-hold.js';
+import { getLanguage, localize, observeLanguage, translateText } from './i18n.js';
+import { initLanguageCurtain, switchLanguage } from './language-curtain.js';
 
 const device = new DeviceController();
 const state = {
@@ -27,50 +29,16 @@ const state = {
 const pages = {home:['首页','home',home],product:['产品介绍','leaf',product],configure:['个性化库编译','settings',configure],device:['硬件情况查看','device',devicePage]};
 const main = document.querySelector('#main'), dialog = document.querySelector('#dialog');
 observeLanguage();
-const reducedLanguageMotion=matchMedia('(prefers-reduced-motion: reduce)');
-const languageTargets=()=>[...document.querySelectorAll(
-  '#main .hero-copy,#main .hero-side-stack,#main .hero-visual-region figcaption,#main .panel-scroll,#main .workspace-label,#main .panel-toggle span,#navigation .nav-link span,#breadcrumb,.sidebar-bottom'
-)].filter(node=>node.getClientRects().length&&getComputedStyle(node).visibility!=='hidden');
-let finishLanguageSwitch;
-function transitionLanguage(update){
-  finishLanguageSwitch?.();
-  if(reducedLanguageMotion.matches||document.hidden||main.dataset.surfaceMoving==='true'){update();return;}
-  let stopped=false,applied=false,animations=[];
-  const clear=()=>animations.forEach(animation=>animation.cancel());
-  const finish=()=>{
-    if(stopped)return;
-    stopped=true;clear();
-    if(!applied){applied=true;update();}
-    delete document.documentElement.dataset.languageChanging;
-    if(finishLanguageSwitch===finish)finishLanguageSwitch=null;
-  };
-  finishLanguageSwitch=finish;
-  const play=(frames,options)=>{
-    animations=languageTargets().map(node=>node.animate(frames,options));
-    return Promise.all(animations.map(animation=>animation.finished.catch(()=>{})));
-  };
-  document.documentElement.dataset.languageChanging='out';
-  void (async()=>{
-    try{
-      await play([{opacity:1},{opacity:0}],{duration:85,easing:'cubic-bezier(.7,0,.84,0)',fill:'forwards'});
-      if(stopped)return;
-      applied=true;update();clear();
-      document.documentElement.dataset.languageChanging='in';
-      await play([{opacity:0},{opacity:1}],{duration:190,easing:'cubic-bezier(.16,1,.3,1)'});
-    }finally{
-      clear();
-      if(finishLanguageSwitch===finish){finishLanguageSwitch=null;delete document.documentElement.dataset.languageChanging;}
-    }
-  })();
-}
-addEventListener('hashchange',()=>finishLanguageSwitch?.());
-document.addEventListener('visibilitychange',()=>{if(document.hidden)finishLanguageSwitch?.();});
-document.querySelector('#language-toggle').addEventListener('click', () => transitionLanguage(() => {
-  setLanguage(getLanguage()==='zh'?'en':'zh');
+initLanguageCurtain(() => {
   if(state.place.country){state.place.countryText=getLanguage()==='en'?(state.place.country.englishName||state.place.country.name):state.place.country.name;const countryInput=document.querySelector('#country-search');if(countryInput)countryInput.value=state.place.countryText;}
   document.title=pages[route][0]+' · 浇水';
-  if(state.ready&&route==='configure')render();else localize(document);
-}));
+  if(state.ready&&route==='device')render({freshDeviceControls:true});
+  else if(state.ready&&route==='configure')render();
+  else localize(document);
+});
+document.querySelector('#language-toggle').addEventListener('click', () => {
+  void switchLanguage(getLanguage()==='zh'?'en':'zh');
+});
 let route = 'home', toastTimer, generationAbort, environmentAbort, environmentGeneration = 0, locationGeneration = 0, locationAbort, dialogSubmit, pollFailures = 0;
 let countryGeneration=0,countryAbort;
 let navigationVersion=0;
@@ -116,7 +84,7 @@ function toast(message, error = false) {
 
 function updateChrome() {
   const labels = {disconnected:'未连接',connecting:'正在连接',handshaking:'正在握手',ready:device.demo?'模拟设备 · 已连接':'设备已连接',error:'连接失败'};
-  const label = labels[device.state];
+  const label = connectionPhases[device.connectionPhase]?.[0] || labels[device.state];
   document.querySelector('#sidebar-connection').textContent = label;
   const connect = document.querySelector('.sidebar-bottom [data-action="connect"]');
   connect.disabled = device.busy; connect.textContent = device.state==='ready' ? '连接管理' : '连接设备';
@@ -126,10 +94,10 @@ function updateChrome() {
   else if(!indicatorMotion.initialized)moveNavigationIndicator(next);
 }
 
-function render() {
+function render({freshDeviceControls=false}={}) {
   if (!state.ready) return;
   const savedScroll=main.dataset.route===route?(main.querySelector('.panel-scroll')?.scrollTop||0):0;
-  const retainedControls=route==='device'&&main.dataset.route===route&&device.state==='ready'
+  const retainedControls=!freshDeviceControls&&route==='device'&&main.dataset.route===route&&device.state==='ready'
     &&main.dataset.deviceGeneration===String(device.generation)?main.querySelector('.device-controls'):null;
   main.innerHTML = pages[route][2](state, device);
   const freshControls=main.querySelector('.device-controls');
@@ -439,6 +407,12 @@ const actions={
     toast(sensorKey?'三轮检查已开始，请立即改变所选传感器的实际输入':'设备已开始三轮传感器检查，请随后刷新查看结果');
   },
   'stop-watering':async()=>{await device.stop();render();toast('设备已确认停泵并回到展示模式');},
+  'manual-servo':async()=>{await device.manualServo();toast('舵机已开始一次扫动');},
+  'manual-pump':async()=>{
+    const on=device.status?.manualPumpOn!==true;
+    await device.manualPump(on);
+    toast(on?'水泵已打开，30 秒后自动关闭':'水泵已关闭');
+  },
   'use-device-observation':async()=>{await device.refresh();state.scene.deviceObservation=device.observationReport();state.dirty=!!state.result;render();toast('已选择设备准备期温湿度作为本次生成输入');},
   'clear-device-observation':()=>{state.scene.deviceObservation=null;state.dirty=!!state.result;render();},
   environment:loadEnvironment,
@@ -469,12 +443,12 @@ const actions={
     else {state.revealConfiguration=true;location.hash='configure';}
     toast(`设备配置 R${config.revision} 已读回，可核对参数或导出`);
   },
-  mode:()=>{
+  mode:async()=>{
     const mode=document.querySelector('#target-mode').value;
-    confirmAction('确认切换运行模式',`将切换到 ${mode}（${modes[mode]}）；${mode==='LONGRUN'?'请先完成实物标定，长期运行可能执行浇水并进入休眠':'设备将按目标模式工作'}；操作仍需固件二次确认`,async()=>{await device.operate('mode',mode);render();toast('设备已确认模式切换');});
+    await device.operate('mode',mode);render();toast('设备已确认模式切换');
   },
-  restart:()=>confirmAction('重启设备','设备将重启，蓝牙连接会断开；当前已保存配置仍保留',async()=>{await device.operate('restart');toast('设备已确认重启');}),
-  'factory-reset':()=>confirmAction('恢复出厂设置','此操作将清除设备本地配置并重启，无法撤销；建议先读取并导出配置',async()=>{await device.operate('factoryReset');toast('设备已确认恢复出厂');},'恢复出厂'),
+  restart:async()=>{await device.operate('restart');toast('设备已确认重启');},
+  'factory-reset':async()=>{await device.operate('factoryReset');toast('设备已确认恢复出厂');},
   history:async()=>{
     state.historyLoading=true;render();
     try{await device.readHistory();state.historyOpen=true;state.historyPage=0;toast(`已读取 ${device.history.length} 条近期记录`);}
@@ -492,11 +466,15 @@ const actions={
   retry:()=>initialize(),
 };
 
-document.addEventListener('click',async event=>{
-  const element=event.target.closest('[data-action]');if(!element||element.disabled)return;
-  const action=actions[element.dataset.action];if(!action)return;
-  event.preventDefault();
+async function runAction(element){
+  const action=actions[element.dataset.action];if(!action||element.disabled)return;
   try{await action(element);}catch(error){toast(error.message,true);if(route==='device'){state.deviceError=error.message;render();}}
+}
+initDeviceHold(runAction);
+document.addEventListener('click',event=>{
+  const element=event.target.closest('[data-action]');if(!element||element.disabled)return;
+  event.preventDefault();
+  void runAction(element);
 });
 
 const polling=setInterval(async()=>{

@@ -88,7 +88,7 @@ fs.mkdirSync(output, { recursive: true });
       { title: '硬件结构', summary: '外壳设计与内部功能设计', aria: '硬件结构' },
       { title: '工作原理', summary: '机器的自动化依据与实现逻辑', aria: '工作原理' },
       { title: '情况需知', summary: '机器为什么会报错，可能的归因是什么？', aria: '情况需知' },
-      { title: '编译需知', summary: '编译设备需要什么的条件以及流程？', aria: '编译需知' },
+      { title: '使用流程', summary: '使用设备具体流程', aria: '使用流程' },
     ]);
     assert.equal(await page.locator('.index-number').count(), 0);
     await page.screenshot({ path: path.join(output, 'product.png') });

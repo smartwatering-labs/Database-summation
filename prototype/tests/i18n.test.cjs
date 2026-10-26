@@ -36,10 +36,19 @@ async function leftovers(page){return page.evaluate(()=>{
   }
   await page.getByRole('button',{name:'Try demo device'}).click();await page.locator('.device-identity').waitFor({timeout:20000});
   assert.deepEqual(await leftovers(page),[],'connected demo device contains untranslated copy');
-  await page.getByRole('button',{name:'Reset to factory settings'}).click();
-  assert.deepEqual(await leftovers(page),[],'factory-reset confirmation contains untranslated copy');
-  assert.match(await page.locator('label.dialog-field').innerText(),/Reset to factory settings/);
-  await page.getByRole('button',{name:'Cancel'}).click();
+  assert.ok(await page.getByRole('button',{name:'Move servo',exact:true}).isEnabled());
+  assert.ok(await page.getByRole('button',{name:'Turn pump on',exact:true}).isEnabled());
+  await page.getByRole('button',{name:'Reset',exact:true}).click();
+  assert.equal(await page.locator('#dialog').evaluate(node=>node.open),false);
+  assert.equal(await page.locator('[data-action="factory-reset"] .device-hold-content').innerText(),'Hold to reset');
+  assert.deepEqual(await leftovers(page),[],'armed factory reset contains untranslated copy');
+  await page.locator('#language-toggle').click();await waitLanguage(page,'zh-CN');
+  assert.equal(await page.locator('[data-action="factory-reset"] .device-hold-content').innerText(),'恢复出厂');
+  await page.getByRole('button',{name:'重启',exact:true}).click();
+  assert.equal(await page.locator('[data-action="restart"] .device-hold-content').innerText(),'长按确认重启');
+  await page.locator('#language-toggle').click();await waitLanguage(page,'en');
+  assert.equal(await page.locator('[data-action="restart"] .device-hold-content').innerText(),'Restart');
+  assert.equal(await page.locator('[data-action="factory-reset"] .device-hold-content').innerText(),'Reset');
   await page.getByRole('button',{name:'Read past week'}).click();await page.waitForTimeout(500);
   assert.deepEqual(await leftovers(page),[],'history contains untranslated copy');
   const eventButton=page.getByRole('button',{name:'Read device events'});
@@ -50,6 +59,8 @@ async function leftovers(page){return page.evaluate(()=>{
   await page.route('**/api/environment',route=>route.fulfill({json:{provider:'Open-Meteo',temperatureC:25,humidityPct:60,elevationM:5,precipitationMmDay:1,sunshineHoursDay:6,period:'Current',observedAt:'2026-10-20T12:00:00+08:00',fetchedAt:'2026-10-20T12:00:00+08:00',timezone:'Asia/Shanghai'}}));
   await page.route('**/api/configurations/generate',route=>route.fulfill({json:{source:'api',environment:{temperatureC:25,humidityPct:60},config:{revision:1,plant:'番茄',locationName:'日本 · 东京',source:'api',supplyVariant:'builtin',configVersion:'1.0',display:{roundWaterMl:50,reservoirDays:10,dailyWaterNeedMl:100,flowRateMlSec:22,estimatedIntervalDays:1},params:{threshold:53,pulseCount:1,pulseOnMs:3000,pulseOffMs:25000}}}}));
   await page.evaluate(()=>location.hash='configure');await page.waitForSelector('#main[data-route="configure"]');
+  await page.locator('[data-action="reload-locations"]').click();
+  await page.waitForFunction(()=>document.querySelector('[data-action="reload-locations"]')?.disabled===false);
   await page.getByLabel('Country / region',{exact:true}).click();
   await page.getByLabel('Country / region',{exact:true}).fill('日');
   await page.locator('#country-options:not([hidden])').waitFor();

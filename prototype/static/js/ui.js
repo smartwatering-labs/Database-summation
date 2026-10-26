@@ -1,5 +1,14 @@
 export function escape(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char])); }
 export const modes = { DISPLAY: '展示 / 调试', PREPARE: '准备 / 校准', LONGRUN: '长期运行' };
+export const connectionPhases = {
+  choosing: ['等待选择设备', '请在浏览器弹窗中点选 SWS-ESP32C3，再点击“配对”；显示“已配对”时也需要选中并确认'],
+  connecting: ['正在建立蓝牙连接', '已选择设备，正在建立连接，请保持设备供电'],
+  waiting: ['等待蓝牙连接完成', '系统里还有一次蓝牙请求没有结算完，网页会自动等待并继续；一直不完成时请在系统蓝牙设置中删除该设备的配对记录'],
+  services: ['正在读取设备服务', '正在读取设备的蓝牙服务与通信通道'],
+  notifications: ['正在启用设备通知', '正在建立设备回复通道，请完成系统出现的配对确认'],
+  handshake: ['正在验证设备', '正在完成协议握手与设备认证'],
+  status: ['正在读取设备状态', '收到设备状态后将显示操作面板'],
+};
 export function icon(name, size = 20) {
   const paths = {
     home: '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>',

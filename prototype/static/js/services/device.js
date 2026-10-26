@@ -16,11 +16,12 @@ export class DeviceController extends EventTarget {
   emit() { this.dispatchEvent(new Event('change')); }
   async connect(settings, demo = false) {
     if (this.busy||this.stopping) throw new Error('请等待当前设备操作完成');
-    this.disconnect(); this.demo = demo; this.state = 'connecting'; this.busy = true; this.stage = null; this.error = ''; this.emit();
+    this.disconnect(); this.demo = demo; this.state = 'connecting'; this.connectionPhase = demo?'connecting':'choosing'; this.busy = true; this.stage = null; this.error = ''; this.emit();
     const generation = this.generation;
     const onDisconnect = () => { if (generation === this.generation) this.disconnect('设备休眠或连接断开，请按外置按钮唤醒后重连'); };
     const onProgress = stage => { if (generation === this.generation) { this.stage = stage; this.emit(); } };
-    const transport = demo ? new DemoTransport(onDisconnect, onProgress) : new BleTransport(settings, onDisconnect, onProgress);
+    const onConnectionPhase = phase => { if (generation === this.generation) { this.connectionPhase = phase; this.emit(); } };
+    const transport = demo ? new DemoTransport(onDisconnect, onProgress) : new BleTransport(settings, onDisconnect, onProgress, onConnectionPhase);
     if (demo) {
       if (this.simulator) {
         transport.config = this.simulator.config ? structuredClone(this.simulator.config) : null;
@@ -33,18 +34,21 @@ export class DeviceController extends EventTarget {
     this.credential=settings.credential||null;
     const session = { generation, transport };
     try {
-      await transport.connect(); this.assertSession(session); this.state = 'handshaking'; this.emit();
+      await transport.connect(); this.assertSession(session); this.state = 'handshaking'; this.connectionPhase = 'handshake'; this.emit();
       await this.authenticate(session);
+      this.connectionPhase = 'status'; this.emit();
       this.status = validateStatus(await this.request(session, 'status'), this.handshake.deviceId);
       this.state = 'ready'; this.lastRead = Date.now(); this.lastSnapshot = null; this.record();
     } catch (error) {
       transport.disconnect();
-      if (this.isSession(session)) { this.state = 'error'; this.status = null; this.error = this.friendly(error); }
+      if (this.isSession(session)) { this.connectionFailurePhase = this.connectionPhase; this.state = 'error'; this.status = null; this.error = this.friendly(error); }
       throw new Error(this.friendly(error));
     }
-    finally { if (this.isSession(session)) { this.busy = false; this.emit(); } }
+    finally { if (this.isSession(session)) { this.busy = false; this.connectionPhase = null; this.emit(); } }
   }
   friendly(error) {
+    if (/Connection already in progress|GATT operation.*progress/i.test(error.message || '')) return '蓝牙仍在处理连接请求，请稍后重试';
+    if (/GATT.*disconnect/i.test(error.message || '') || error.name === 'NetworkError') return '蓝牙在连接初始化时断开，请保持设备供电后重试';
     if (error.name === 'NotFoundError') return '未选择设备或未发现可用设备，请确认已按外置按钮唤醒';
     if (error.name === 'SecurityError') return '浏览器拒绝蓝牙访问，请检查安全连接与蓝牙权限';
     return error.message || '设备操作失败';
@@ -227,6 +231,21 @@ export class DeviceController extends EventTarget {
     const payload=stimulatedSensorKey?{stimulatedSensorKey}:{};
     const result=await this.request(session,'quickCheck',payload);if(result?.started!==true)throw new Error('设备未确认开始检查');return result;
   });}
+  async manualServo(){return this.lock(async session=>{
+    if(!this.handshake.capabilities?.includes('manual-control'))throw new Error('当前固件未提供手动控制');
+    const result=await this.request(session,'manualServo');
+    if(result?.started!==true)throw new Error('设备未确认舵机动作');
+    this.status=validateStatus(await this.request(session,'status'),this.handshake.deviceId);
+    return result;
+  });}
+  async manualPump(on){return this.lock(async session=>{
+    if(!this.handshake.capabilities?.includes('manual-control'))throw new Error('当前固件未提供手动控制');
+    const result=await this.request(session,'manualPump',{on});
+    if(result?.pumpOn!==on)throw new Error('设备未确认水泵状态');
+    this.status=validateStatus(await this.request(session,'status'),this.handshake.deviceId);
+    if(this.status.manualPumpOn!==on)throw new Error('设备水泵状态与回执不一致');
+    return result;
+  });}
   async stop() {
     if(!this.demo&&this.transport?.emergencyStop){
       this.ensureReady();if(this.stopping)throw new Error('正在等待设备停止确认');
@@ -260,6 +279,7 @@ export class DeviceController extends EventTarget {
     });
   }
   disconnect(message = '') {
+    this.connectionPhase = null; this.connectionFailurePhase = null;
     if (this.status && this.lastRead) this.lastSnapshot = { status: this.status, readAt: this.lastRead, demo: this.demo };
     this.generation++; this.refreshing = false; this.transport?.disconnect(); this.transport = null; this.handshake = null;
     this.state = 'disconnected'; this.status = null; this.history = []; this.events = []; this.trend = []; this.lastSampleKey = null; this.busy = false;this.stopping=false; this.stage = this.pendingWrite ? 'unknown' : this.stage === 'saved' ? 'saved' : null; this.error = message; this.demo = false; this.emit();

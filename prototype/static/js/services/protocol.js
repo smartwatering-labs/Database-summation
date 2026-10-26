@@ -130,6 +130,8 @@ export async function readSecureMessage(envelope,security,role,sequence){
 export function validateStatus(value, deviceId) {
   if (value?.protocol !== PROTOCOL || value?.protocolVersion !== VERSION || value?.deviceId !== deviceId) throw new Error('设备状态来源或协议不匹配');
   if (!['DISPLAY', 'PREPARE', 'LONGRUN'].includes(value.mode) || !Number.isInteger(value.configRevision) || value.configRevision < 0) throw new Error('设备状态格式无效');
+  if ((value.manualPumpOn != null && typeof value.manualPumpOn !== 'boolean') ||
+      (value.servoBusy != null && typeof value.servoBusy !== 'boolean')) throw new Error('设备手动控制状态无效');
   const s = value.sample;
   if (s != null) {
     for (const [key, min, max] of [['temperatureC', -60, 100], ['humidityPct', 0, 100], ['soilAdc', 0, 4095], ['rainAdc', 0, 4095], ['wateringDemand', 0, 100], ['solarVoltageV', 0, 30]]) {

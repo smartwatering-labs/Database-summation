@@ -1,13 +1,53 @@
 import { FrameDecoder, encodeMessage, PROTOCOL, VERSION, secureMessage, readSecureMessage } from './protocol.js';
 
+// Browser GATT operations can settle after disconnect(). Share ownership and
+// the outstanding native operation across transports for the same device.
+const connections = new Map();
+const cancelledConnection = () => new Error('连接已取消');
+// Windows keeps one native Connect per device. Any later connect() reports this
+// same pending request as "already in progress" until the first one settles.
+const busyOperation = /Connection already in progress|GATT operation.*progress/i;
+async function waitForLink(gatt, signal, timeout) {
+  const until = Date.now() + Math.max(0, timeout);
+  for (;;) {
+    if (signal.aborted) throw cancelledConnection();
+    if (gatt.connected) return true;
+    if (Date.now() >= until) return false;
+    await new Promise(resolve => setTimeout(resolve, Math.min(250, until - Date.now())));
+  }
+}
+function waitForSetup(operation, signal, timeout) {
+  return new Promise((resolve, reject) => {
+    const abort = () => finish(reject, cancelledConnection());
+    const timer = setTimeout(() => finish(reject, new Error('蓝牙连接初始化超时，请保持设备供电后重试')), Math.max(0, timeout));
+    const finish = (settle, value) => {
+      clearTimeout(timer); signal.removeEventListener('abort', abort); settle(value);
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    Promise.resolve(operation).then(value => finish(resolve, value), error => finish(reject, error));
+    if (signal.aborted) abort();
+  });
+}
+
 export class BleTransport {
-  constructor(settings, onDisconnect, onProgress) {
+  constructor(settings, onDisconnect, onProgress, onConnectionPhase = () => {}) {
     this.settings = settings; this.onDisconnect = onDisconnect; this.onProgress = onProgress;
+    this.onConnectionPhase = onConnectionPhase;
     this.pending = new Map(); this.queue = Promise.resolve(); this.closed = true;
     this.gattWrites=Promise.resolve();this.stopRequested=false;
+    // A native Connect that the browser reports as "already in progress" owns the
+    // device until it settles: wait this long for it to become a link, retry once,
+    // then report an actionable error instead of re-requesting it indefinitely.
+    this.inProgressWaitMs = 3000;
     this.configureLimits();
     this.decoder = new FrameDecoder(message => this.receive(message), () => this.rejectAll(new Error('设备返回消息损坏，请重新连接')));
-    this.handleDisconnect = () => { this.closed = true; this.rejectAll(new Error('蓝牙已断开，请唤醒设备后重新连接')); this.onDisconnect(); };
+    this.handleDisconnect = () => {
+      if (this.device?.gatt.connected) return;
+      this.closed = true; this.rejectAll(new Error('蓝牙已断开，请唤醒设备后重新连接'));
+      // Initialization owns recovery until it succeeds or fails. Do not release
+      // the controller's busy flag while native service discovery is pending.
+      if (!this.opening) this.onDisconnect();
+    };
     this.handleNotification = event => this.decoder.push(new Uint8Array(event.target.value.buffer, event.target.value.byteOffset, event.target.value.byteLength));
   }
   configureLimits(limits = {}) {
@@ -31,21 +71,89 @@ export class BleTransport {
     catch(error){const pending=this.pending.get('emergency-stop');if(pending){clearTimeout(pending.timer);this.pending.delete('emergency-stop');pending.reject(error);}throw error;}
     finally{this.stopRequested=false;this.configureSecurity(null);}
   }
-  async connect() {
+  connect() {
+    if (this.opening) return this.opening;
+    this.setupAbort = new AbortController();
+    const signal = this.setupAbort.signal;
+    this.opening = this.open(signal).finally(() => { this.opening = null; });
+    return this.opening;
+  }
+  async open(signal) {
     if (!globalThis.isSecureContext || !navigator.bluetooth) throw new Error('当前环境无法使用 Web Bluetooth，请用支持该功能的浏览器访问 localhost 或 HTTPS');
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     for (const key of ['serviceUuid', 'writeUuid', 'notifyUuid']) if (!uuid.test(this.settings[key] || '')) throw new Error('尚未设置实际 BLE UUID请在连接设置中填写固件服务及特征 UUID');
-    this.device = await navigator.bluetooth.requestDevice({ filters: [{ services: [this.settings.serviceUuid] }] });
+    this.onConnectionPhase('choosing');
+    const selected = await navigator.bluetooth.requestDevice({ filters: [{ services: [this.settings.serviceUuid] }] });
+    if (signal.aborted) throw cancelledConnection();
+    const key = selected.id || selected;
+    const connection = connections.get(key) || { owner: null, pending: null };
+    if (connection.owner && connection.owner !== this) throw new Error('设备正在处理其他连接请求，请稍后重试');
+    connections.set(key, connection); connection.owner = this;
+    this.connection = connection; this.device = selected;
     this.device.addEventListener('gattserverdisconnected', this.handleDisconnect);
+    const deadline = Date.now() + 30000;
+    const check = () => {
+      if (signal.aborted || connection.owner !== this) throw cancelledConnection();
+    };
+    const step = async operation => {
+      check();
+      const pending = Promise.resolve().then(operation);
+      connection.pending = pending;
+      const settled = () => {
+        if (connection.pending === pending) connection.pending = null;
+        if (!connection.owner && selected.gatt.connected) selected.gatt.disconnect();
+      };
+      pending.then(settled, settled);
+      const result = await waitForSetup(pending, signal, deadline - Date.now());
+      check();
+      if (!selected.gatt.connected) throw new Error('GATT Server is disconnected');
+      return result;
+    };
     try {
-      const server = await this.device.gatt.connect();
-      const service = await server.getPrimaryService(this.settings.serviceUuid);
-      this.writer = await service.getCharacteristic(this.settings.writeUuid);
-      this.reader = await service.getCharacteristic(this.settings.notifyUuid);
-      if (!this.writer.properties.write) throw new Error('写入特征必须支持带响应写入');
-      if (!this.reader.properties.notify && !this.reader.properties.indicate) throw new Error('接收特征不支持通知');
-      this.reader.addEventListener('characteristicvaluechanged', this.handleNotification);
-      await this.reader.startNotifications(); this.closed = false;
+      // A cancelled transport may still have a native connect/discovery promise.
+      if (connection.pending) {
+        this.onConnectionPhase('waiting');
+        await waitForSetup(connection.pending.catch(() => {}), signal, deadline - Date.now());
+      }
+      check();
+      let failures = 0, busyRetried = false;
+      for (;;) {
+        try {
+          this.onConnectionPhase('connecting');
+          const server = selected.gatt.connected ? selected.gatt : await step(() => selected.gatt.connect());
+          this.onConnectionPhase('services');
+          const service = await step(() => server.getPrimaryService(this.settings.serviceUuid));
+          this.writer = await step(() => service.getCharacteristic(this.settings.writeUuid));
+          this.reader = await step(() => service.getCharacteristic(this.settings.notifyUuid));
+          if (!this.writer.properties.write) throw new Error('写入特征必须支持带响应写入');
+          if (!this.reader.properties.notify && !this.reader.properties.indicate) throw new Error('接收特征不支持通知');
+          this.reader.addEventListener('characteristicvaluechanged', this.handleNotification);
+          this.onConnectionPhase('notifications');
+          await step(() => this.reader.startNotifications());
+          this.closed = false; return;
+        } catch (error) {
+          check();
+          const inProgress = busyOperation.test(error.message);
+          const transient = inProgress || error.name === 'NetworkError' || /GATT.*disconnect/i.test(error.message);
+          if (!transient || Date.now() >= deadline) throw error;
+          this.reader?.removeEventListener('characteristicvaluechanged', this.handleNotification);
+          this.reader = null; this.writer = null;
+          if (inProgress) {
+            // Retrying connect() cannot settle the native request that produced
+            // this error, and disconnecting would cancel work that may still
+            // succeed. Wait for that request to become a link.
+            this.onConnectionPhase('waiting');
+            if (await waitForLink(selected.gatt, signal, Math.min(this.inProgressWaitMs, deadline - Date.now()))) continue;
+            if (busyRetried) throw new Error('蓝牙连接请求一直未完成，请在系统蓝牙设置中删除该设备的配对记录后重试');
+            busyRetried = true;
+            continue;
+          }
+          if (++failures >= 3) throw error;
+          selected.gatt.disconnect();
+          this.onConnectionPhase('waiting');
+          await waitForSetup(new Promise(resolve => setTimeout(resolve, 400 * failures)), signal, deadline - Date.now());
+        }
+      }
     } catch (error) { this.disconnect(); throw error; }
   }
   async receive(message) {
@@ -128,11 +236,16 @@ export class BleTransport {
   }
   rejectAll(error) { for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(error); } this.pending.clear(); this.decoder.reset(); }
   disconnect() {
+    this.setupAbort?.abort();
     this.security=null;
     this.closed = true;
     this.reader?.removeEventListener('characteristicvaluechanged', this.handleNotification);
     this.device?.removeEventListener('gattserverdisconnected', this.handleDisconnect);
-    this.device?.gatt?.disconnect();
+    if (this.connection?.owner === this) {
+      this.connection.owner = null;
+      this.device?.gatt?.disconnect();
+    }
+    this.reader = null; this.writer = null;
     this.rejectAll(new Error('连接已关闭'));
   }
 }

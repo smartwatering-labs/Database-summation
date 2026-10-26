@@ -30,7 +30,8 @@ class BoardRuntime:public sws::RuntimeIO {
   uint32_t boot=0,seq=0,eventSeq=0,logSeq=0,lastFlush=0,lastHistory=0,nextSample=0,phaseAt=0,lastAdc=0,sampleAt=0;
   uint64_t resumedWait=0;
   int64_t prepareFinishedAt=0;
-  bool dirty=false,servoAttached=false,supplySuspected=false;
+  bool dirty=false,servoAttached=false,supplySuspected=false,manualPumpOn=false;
+  uint32_t manualPumpAt=0;
   unsigned acquisition=0,adcCount=0,servoStage=0;
   int soil[5]{},rain[5]{},solar[5]{};
   double temperature=NAN,humidity=NAN;
@@ -187,9 +188,9 @@ class BoardRuntime:public sws::RuntimeIO {
       else if(std::string(key)=="humidityPct"){e["referenceMin"]=0;e["referenceMax"]=100;e["observedSummary"]["value"]=latest["humidityPct"];}
       e["quality"]=latest["quality"][key]["status"];events.back()=sws::json(e);dirty=true;}
   }
-  void startServo(){if(!calibration.valid()||control.active())return;
-    servoAttached=ledcAttach(SWS_SERVO_PIN,50,14);if(!servoAttached){runtimeEvent("servo-error","擦拭未执行，请检查 PWM 与标定");return;}
-    ledcWrite(SWS_SERVO_PIN,uint32_t(calibration.servoWipeUs)*16383/20000);servoStage=1;phaseAt=millis();}
+  bool startServo(){if(!calibration.valid()||control.active()||pumpState||servoStage)return false;
+    servoAttached=ledcAttach(SWS_SERVO_PIN,50,14);if(!servoAttached){runtimeEvent("servo-error","擦拭未执行，请检查 PWM 与标定");return false;}
+    ledcWrite(SWS_SERVO_PIN,uint32_t(calibration.servoWipeUs)*16383/20000);servoStage=1;phaseAt=millis();return true;}
   bool parseCalibration(JsonVariantConst v,sws::Calibration& c){
     if(!v.is<JsonObjectConst>()||!v["verified"].is<bool>()||v["verified"]!=true||v["boardVersion"]!="10-01"
       ||!v["measuredAt"].is<const char*>()||v["measuredAt"].as<std::string>().empty())return false;
@@ -220,6 +221,8 @@ public:
   std::function<bool(const std::string&)> provision;
   BoardRuntime():control(*this){}
   void pump(bool on)override{pumpState=on;if(initialized)digitalWrite(SWS_PUMP_PIN,on?HIGH:LOW);}
+  void manualPumpOff(const char* code="manual-pump-off"){
+    if(!manualPumpOn)return;manualPumpOn=false;pump(false);runtimeEvent(code,"手动水泵已关闭");}
   bool checkpoint(bool attempting,uint32_t revision)override{JsonDocument d;d["attempting"]=attempting;d["revision"]=revision;
     d["recordedAt"]=epochTime();return saveRecord("attempt",sws::json(d))&&flush();}
   void runtimeEvent(const char* code,const char* impact)override{
@@ -276,13 +279,14 @@ public:
     if(restoring&&resumed&&clockTrusted&&swsSleep.revision==config.revision&&control.setMode("LONGRUN",millis()))startServo();}
   void describe(JsonObject out){out["runtimeProfile"]="watering-board-10-01";out["automaticWatering"]=control.automaticReady();
     auto modes=out["supportedModes"].to<JsonArray>();modes.add("DISPLAY");modes.add("PREPARE");if(control.automaticReady())modes.add("LONGRUN");
-    auto caps=out["capabilities"].as<JsonArray>();for(auto s:{"sample-quality","events","time-sync","time-probe","emergency-stop","prepare-summary","quick-check"})caps.add(s);
+    auto caps=out["capabilities"].as<JsonArray>();for(auto s:{"sample-quality","events","time-sync","time-probe","emergency-stop","prepare-summary","quick-check","manual-control"})caps.add(s);
     out["wakeSources"]["timer"]=true;out["wakeSources"]["button"]=SWS_WAKE_PIN>=0;}
   void status(JsonObject out){if(latest.isNull())out["sample"]=nullptr;else out["sample"].set(latest);
     out["sensorState"]=calibration.valid()?"calibrated":"uncalibrated";
     out["mode"]=control.currentMode();out["automaticWatering"]=control.automaticReady();out["calibrationReady"]=calibration.valid();out["timeQuality"]=clockTrusted?"trusted":"unknown";
     if(lastSyncAt>0)out["lastSyncAt"]=lastSyncAt;else out["lastSyncAt"]=nullptr;
-    out["controlState"]=control.active()?"watering":"idle";out["controlInhibition"]=control.inhibition();
+    out["controlState"]=manualPumpOn?"manual-watering":control.active()?"watering":"idle";out["controlInhibition"]=control.inhibition();
+    out["manualPumpOn"]=manualPumpOn;out["servoBusy"]=servoStage!=0;
     if(control.intervalRemainingMs()==UINT64_MAX)out["minIntervalRemainingSeconds"]=nullptr;else out["minIntervalRemainingSeconds"]=control.intervalRemainingMs()/1000;
     out["logStorageReady"]=logs;out["quickCheck"]["remainingSamples"]=quickRemaining;out["quickCheck"]["validSamples"]=quickValid;
     if(!quickStimulatedKey.empty())out["quickCheck"]["stimulatedSensorKey"]=quickStimulatedKey;
@@ -297,8 +301,8 @@ public:
     auto baselines=summary["baseline"].to<JsonObject>();for(int i=0;i<5;i++){double value=control.baselineValue(i);if(std::isfinite(value))baselines[keys[i]]=value;else baselines[keys[i]]=nullptr;}
     summary["complete"]=control.prepareComplete();summary["finishedAt"]=prepareFinishedAt;summary["durationSeconds"]=control.prepareComplete()?600:0;summary["bootCount"]=boot;summary["configRevision"]=config.revision;summary["flowRateMlSec"]=calibration.valid()?calibration.flowMlSec:0;}
   bool modeAllowed(const std::string& mode){return mode=="DISPLAY"||mode=="PREPARE"||(mode=="LONGRUN"&&control.automaticReady());}
-  bool changeMode(const std::string& mode){if(!modeAllowed(mode))return false;if(mode!="LONGRUN")shutdown();if(!control.setMode(mode,millis()))return false;sampleDone=false;nextSample=0;if(mode=="LONGRUN")startServo();return true;}
-  bool active()const{return control.active();}
+  bool changeMode(const std::string& mode){if(!modeAllowed(mode))return false;manualPumpOff();if(mode!="LONGRUN")shutdown();if(!control.setMode(mode,millis()))return false;sampleDone=false;nextSample=0;if(mode=="LONGRUN")startServo();return true;}
+  bool active()const{return control.active()||manualPumpOn;}
   std::string mode()const{return control.currentMode();}
   bool displayRows(std::string& second,std::string& third){
     if(latest.isNull())return false;char text[40];
@@ -309,8 +313,23 @@ public:
     third=calibration.valid()?control.currentMode():"请先完成标定";return true;
   }
   int request(const std::string& action,JsonVariantConst p,JsonObject out,std::string& error){
+    if(action=="manualServo"){
+      if(control.currentMode()!="DISPLAY"||control.active()||manualPumpOn){error="请先进入展示模式并关闭水泵";return -1;}
+      if(!calibration.valid()){error="请先完成舵机端点的实物标定";return -1;}
+      if(servoStage){error="舵机正在执行上一次动作";return -1;}
+      if(!startServo()){error="舵机 PWM 启动失败，请检查接线与供电";return -1;}
+      out["started"]=true;out["durationMs"]=calibration.servoMoveMs*2;return 1;
+    }
+    if(action=="manualPump"){
+      if(!p["on"].is<bool>()){error="水泵命令缺少开关状态";return -1;}
+      if(control.currentMode()!="DISPLAY"||control.active()||servoStage){error="请先进入展示模式并等待舵机停止";return -1;}
+      bool on=p["on"].as<bool>();
+      if(on&&!manualPumpOn){pump(true);manualPumpOn=true;manualPumpAt=millis();runtimeEvent("manual-pump-on","手动水泵已开启，30 秒后自动关闭");}
+      if(!on)manualPumpOff();
+      out["pumpOn"]=manualPumpOn;out["maxRunSeconds"]=30;return 1;
+    }
     if(action=="quickCheck"){
-      if(control.currentMode()!="DISPLAY"||control.active()){error="快速检查需先停止浇水并进入展示模式";return -1;}
+      if(control.currentMode()!="DISPLAY"||active()){error="快速检查需先停止浇水并进入展示模式";return -1;}
       std::string key=p["stimulatedSensorKey"]|"";int channel=-1;
       if(!key.empty()){
         for(int i=0;i<5;i++)if(key==channelKeys[i])channel=i;
@@ -347,12 +366,13 @@ public:
       if(sws::json(out).size()>5000){rows.remove(rows.size()-1);end=i;break;}}}
     if(end<records.size())out["nextCursor"]=std::to_string(end);else out["nextCursor"]=nullptr;return 1;
   }
-  void shutdown(){control.stop();digitalWrite(SWS_SENSOR_POWER_PIN,LOW);pinMode(SWS_DHT_PIN,INPUT);acquisition=0;if(servoAttached)ledcDetach(SWS_SERVO_PIN);pinMode(SWS_SERVO_PIN,OUTPUT);digitalWrite(SWS_SERVO_PIN,LOW);servoAttached=false;servoStage=0;flush();}
+  void shutdown(){manualPumpOff();control.stop();digitalWrite(SWS_SENSOR_POWER_PIN,LOW);pinMode(SWS_DHT_PIN,INPUT);acquisition=0;if(servoAttached)ledcDetach(SWS_SERVO_PIN);pinMode(SWS_SERVO_PIN,OUTPUT);digitalWrite(SWS_SERVO_PIN,LOW);servoAttached=false;servoStage=0;flush();}
   bool erase(){shutdown();control.reset();calibration=sws::Calibration{};config=sws::RuntimeConfig{};clockTrusted=false;lastSyncAt=0;swsSleep={};bool ok=nvs&&prefs.clear();
     for(int slot=0;slot<2;slot++){String path=String("/sws-log-")+slot+".log";if(LittleFS.exists(path)&&!LittleFS.remove(path))ok=false;}
     history.clear();events.clear();logSeq=0;dirty=true;return ok&&flush();}
   void tick(uint32_t now,bool linked,bool txIdle){
     serialCommand();control.storage(nvs&&logs);control.tick(now);
+    if(manualPumpOn&&uint32_t(now-manualPumpAt)>=30000)manualPumpOff("manual-pump-timeout");
     if(servoStage&&uint32_t(now-phaseAt)>=calibration.servoMoveMs){if(servoStage==1){ledcWrite(SWS_SERVO_PIN,uint32_t(calibration.servoParkUs)*16383/20000);servoStage=2;phaseAt=now;}
       else {ledcDetach(SWS_SERVO_PIN);servoAttached=false;servoStage=0;runtimeEvent("wipe-completed","舵机擦拭命令已完成，需以实物动作验收");}}
     bool waitForSleep=control.currentMode()=="LONGRUN"&&sampleDone&&!control.active()&&!linked;

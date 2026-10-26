@@ -6,6 +6,134 @@ import { DeviceController } from '../static/js/services/device.js';
 import { BleTransport } from '../static/js/services/ble.js';
 import { validateConfigFile, importedConfigResult, configFileContents } from '../static/js/services/config-file.js';
 
+const bleSettings = {
+  serviceUuid:'00000000-0000-4000-8000-000000000001',
+  writeUuid:'00000000-0000-4000-8000-000000000002',
+  notifyUuid:'00000000-0000-4000-8000-000000000003',
+};
+function deferred() { let resolve; const promise=new Promise(done=>{resolve=done;}); return {promise,resolve}; }
+function mockGatt(t) {
+  const selected=new EventTarget(),reader=new EventTarget(),demo=new DemoTransport(()=>{},()=>{},0);
+  selected.id=crypto.randomUUID(); reader.properties={notify:true}; reader.startNotifications=async()=>reader;
+  const decoder=new FrameDecoder(async message=>{
+    const payload=await demo.request(message.action,message.payload);
+    for(const frame of encodeMessage({id:message.id,protocol:'SWS-BLE',protocolVersion:'1.0',status:'ok',payload})){
+      reader.value=new DataView(frame.buffer,frame.byteOffset,frame.byteLength);
+      reader.dispatchEvent(new Event('characteristicvaluechanged'));
+    }
+  });
+  const writer={properties:{write:true},writeValueWithResponse:async bytes=>decoder.push(bytes)};
+  const service={getCharacteristic:async uuid=>uuid===bleSettings.writeUuid?writer:reader};
+  const gatt={connected:false,connects:0,disconnects:0,
+    async connect(){this.connects++;this.connected=true;await demo.connect();return this;},
+    async getPrimaryService(){return service;},
+    disconnect(){this.disconnects++;const wasConnected=this.connected;this.connected=false;
+      if(wasConnected)selected.dispatchEvent(new Event('gattserverdisconnected'));},
+  };
+  selected.gatt=gatt;
+  for(const [key,value] of Object.entries({isSecureContext:true,navigator:{bluetooth:{requestDevice:async()=>selected}}})){
+    const previous=Object.getOwnPropertyDescriptor(globalThis,key);
+    Object.defineProperty(globalThis,key,{configurable:true,value});
+    t.after(()=>previous?Object.defineProperty(globalThis,key,previous):delete globalThis[key]);
+  }
+  return {selected,gatt,service,reader,demo};
+}
+
+test('GATT disconnect during discovery recovers before exposing ready device panels',async t=>{
+  const {gatt,service}=mockGatt(t),controller=new DeviceController();t.after(()=>controller.disconnect());
+  let discoveries=0;
+  gatt.getPrimaryService=async()=>{
+    if(++discoveries===1){
+      gatt.disconnect();
+      assert.equal(controller.state,'connecting');assert.equal(controller.busy,true);
+      await assert.rejects(controller.connect(bleSettings),/请等待/);
+      throw new DOMException('GATT Server is disconnected. Cannot retrieve services.','NetworkError');
+    }
+    return service;
+  };
+  await controller.connect(bleSettings);
+  assert.equal(gatt.connects,2);assert.equal(discoveries,2);
+  assert.equal(controller.state,'ready');assert.equal(controller.busy,false);
+  assert.match(devicePage({settings:{}},controller),/手动控制/);
+});
+
+test('a browser connection-in-progress error is retried with fresh service discovery',async t=>{
+  const {gatt}=mockGatt(t),controller=new DeviceController();t.after(()=>controller.disconnect());
+  const connect=gatt.connect.bind(gatt);let calls=0;
+  gatt.connect=async()=>{if(++calls===1)throw new DOMException('Connection already in progress.','NetworkError');return connect();};
+  await controller.connect(bleSettings);
+  assert.equal(calls,2);assert.equal(controller.state,'ready');assert.equal(controller.busy,false);
+});
+
+test('a pending native connection is awaited, retried once, then reported without cancelling it',async t=>{
+  const {gatt}=mockGatt(t),controller=new DeviceController();t.after(()=>controller.disconnect());
+  let calls=0;
+  gatt.connect=async()=>{
+    assert.equal(gatt.disconnects,0,'busy platform work must not be cancelled by retries');
+    calls++;
+    throw new DOMException('Connection already in progress.','NetworkError');
+  };
+  const phases=[];controller.addEventListener('change',()=>phases.push(controller.connectionPhase));
+  await assert.rejects(controller.connect(bleSettings),/系统蓝牙设置[\s\S]*配对记录/);
+  assert.equal(calls,2,'a pending native request is awaited, not re-requested in a loop');
+  assert.equal(gatt.disconnects,1,'only the failure teardown releases the device');
+  assert.equal(controller.state,'error');assert.equal(controller.busy,false);
+  for(const phase of ['choosing','connecting','waiting'])assert.ok(phases.includes(phase),phase);
+});
+
+test('late cancelled GATT connect cannot overlap or disconnect a newer session',async t=>{
+  const {gatt}=mockGatt(t),controller=new DeviceController();t.after(()=>controller.disconnect());
+  const entered=deferred(),release=deferred(),connect=gatt.connect.bind(gatt);let calls=0;
+  gatt.connect=async()=>{calls++;entered.resolve();await release.promise;return connect();};
+  const old=controller.connect(bleSettings);const rejected=assert.rejects(old,/连接已取消/);
+  await entered.promise;controller.disconnect();
+  const current=controller.connect(bleSettings);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(calls,1,'the native connect still in progress must be awaited');
+  release.resolve();await rejected;await current;
+  assert.equal(calls,1);assert.equal(gatt.connected,true);assert.equal(controller.state,'ready');
+});
+
+test('cancelling the device chooser prevents its late result from starting GATT',async t=>{
+  const {selected,gatt}=mockGatt(t),controller=new DeviceController();t.after(()=>controller.disconnect());
+  const choice=deferred();let picks=0;
+  navigator.bluetooth.requestDevice=()=>++picks===1?choice.promise:Promise.resolve(selected);
+  const old=controller.connect(bleSettings);const rejected=assert.rejects(old,/连接已取消/);
+  assert.equal(controller.connectionPhase,'choosing');
+  assert.match(devicePage({settings:{}},controller),/等待选择设备/);
+  controller.disconnect();await controller.connect(bleSettings);
+  choice.resolve(selected);await rejected;
+  assert.equal(gatt.connects,1);assert.equal(gatt.connected,true);assert.equal(controller.state,'ready');
+});
+
+test('exhausted GATT setup releases busy state and a subsequent connection succeeds',async t=>{
+  const {gatt,service}=mockGatt(t),controller=new DeviceController();t.after(()=>controller.disconnect());
+  gatt.getPrimaryService=async()=>{throw new DOMException('GATT Server is disconnected.','NetworkError');};
+  await assert.rejects(controller.connect(bleSettings),/蓝牙在连接初始化时断开/);
+  assert.equal(gatt.connects,3);assert.equal(controller.busy,false);assert.equal(controller.state,'error');
+  gatt.getPrimaryService=async()=>service;
+  await controller.connect(bleSettings);assert.equal(controller.state,'ready');
+});
+
+test('an existing GATT link still completes notifications and handshake before ready',async t=>{
+  const {gatt,demo}=mockGatt(t),controller=new DeviceController();t.after(()=>controller.disconnect());
+  gatt.connected=true;await demo.connect();
+  await controller.connect(bleSettings);
+  assert.equal(gatt.connects,0);assert.equal(controller.state,'ready');assert.equal(controller.status.deviceId,'DEMO-WATER001');
+});
+
+test('a stalled native connection times out and its late completion is closed',async t=>{
+  const {gatt}=mockGatt(t),controller=new DeviceController();t.after(()=>controller.disconnect());
+  const entered=deferred(),release=deferred(),connect=gatt.connect.bind(gatt);
+  gatt.connect=async()=>{entered.resolve();await release.promise;return connect();};
+  t.mock.timers.enable({apis:['setTimeout']});
+  const opening=controller.connect(bleSettings);const rejected=assert.rejects(opening,/蓝牙连接初始化超时/);
+  await entered.promise;t.mock.timers.tick(30000);await rejected;
+  assert.equal(controller.busy,false);assert.equal(controller.state,'error');
+  release.resolve();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(gatt.connected,false,'a late native completion must not leave an orphan GATT connection');
+});
+
 test('browser configuration files use the server 1.0 limits and strip private fields',()=>{
   const config={deviceModel:'ESP32-WATER-C3',configVersion:'1.0',revision:2,plant:' 番茄 ',
     auth:'private',signature:'private',params:{soilWeight:.6,tempWeight:.3,airWeight:.1,threshold:50,

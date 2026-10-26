@@ -108,13 +108,27 @@ function layoutFor(page) {
     const captionHeight = page === 'product' && innerWidth >= 1200 ? 0 : 56;
     const usableWidth = Math.max(80, box.width - inset * 2);
     const usableHeight = Math.max(80, box.height - inset * 2 - captionHeight);
+    const tallPoster = Math.min(1, Math.max(0, (innerHeight - 720) / 180));
+    const posterScale = page === 'home'
+      ? (innerWidth < 768 ? 1.16 : innerWidth < 960 ? 1.18 : 1.23)
+      : (innerWidth < 768 ? 1.12 : innerWidth < 960 ? 1.10 : innerWidth < 1200 ? 1.14 : 1.10 + .04 * tallPoster);
+    // On shorter wide posters, leave enough canvas below the case for the soft shadow.
+    const shadowClearance = Math.min(112, Math.max(96, stageBox.height * .12));
+    const safePosterScale = page === 'product' && innerWidth >= 1200
+      ? Math.min(posterScale, (stageBox.height - shadowClearance) / usableHeight) : posterScale;
     const scale = Math.min(CAMERA_HEIGHT * usableWidth / height / reference.size.x,
-      CAMERA_HEIGHT * usableHeight / height / reference.size.y);
-    const x = box.left - stageBox.left + box.width / 2;
-    // Lift the taller exploded assembly slightly so the lower shadow remains
-    // inside the canvas at 1000px-tall desktop viewports.
-    const lift = page === 'product' && innerWidth >= 960 ? 28 : 0;
-    const y = box.top - stageBox.top + inset + usableHeight / 2 - lift;
+      CAMERA_HEIGHT * usableHeight / height / reference.size.y) * safePosterScale;
+    const details = page === 'home' && innerWidth >= 960 ? main.querySelector('.hero-side-stack') : null;
+    // Balance the home model between the visible copy column and the right edge.
+    const x = details
+      ? (details.getBoundingClientRect().right + stageBox.right) / 2 - stageBox.left
+      : box.left - stageBox.left + box.width / 2;
+    // Leave a little more room below the exploded assembly for its ground shadow.
+    const productLift = page === 'product' && innerWidth >= 960
+      ? Math.min(20, Math.max(10, (stageBox.height - 500) * .04)) : 0;
+    const y = page === 'product'
+      ? (innerWidth >= 960 ? stageBox.height / 2 - productLift : box.top - stageBox.top + box.height / 2)
+      : box.top - stageBox.top + inset + usableHeight / 2;
     return { scale, x: (x / width - .5) * cameraWidth - reference.center.x * scale,
       y: (.5 - y / height) * CAMERA_HEIGHT - reference.center.y * scale };
   }

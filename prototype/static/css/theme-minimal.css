@@ -72,6 +72,8 @@ body:is([data-page=home],[data-page=product]) #model-stage{height:calc(100% - 76
 .language-toggle{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:32px;padding:4px 12px;border:1px solid #dfe3e7;border-radius:999px;background:#fff;color:var(--poster-ink);font:500 12px/1.3 'Roboto Flex Local',sans-serif;letter-spacing:.02em;cursor:pointer;transition:background-color 180ms ease,border-color 180ms ease,color 180ms ease}
 .language-toggle:hover{background:#f7f9fb;border-color:#aebdcb;color:#17518f}
 .language-toggle:focus-visible{outline:2px solid var(--focus);outline-offset:3px}
+.language-toggle[data-switching-to]{background:var(--poster-ink);border-color:var(--poster-ink);color:var(--poster-paper)}
+.language-curtain{position:fixed;inset:0;width:100vw;height:100dvh;z-index:90;margin:0;padding:0;border:0;border-radius:0;background:var(--poster-ink);pointer-events:none;transform:scaleX(0);transform-origin:left center;will-change:transform}
 .hero-side-stack{grid-area:details;position:static;inset:auto;width:auto;display:flex;flex-direction:column;gap:18px;margin:0;max-width:440px}
 .hero-index-panel{padding:0;background:none;border:0;border-radius:0;box-shadow:none}
 .hero-index-panel .detail-row{grid-template-columns:minmax(0,1fr) 20px;gap:16px;min-height:74px;padding:14px 0;border:0;border-top:1px solid var(--line);border-radius:0;background:transparent}
@@ -175,4 +177,34 @@ dialog[open].is-closing::backdrop{animation:quiet-backdrop-exit 150ms var(--moti
 @media(prefers-reduced-motion:reduce){
  .hero-page .actions .button:is(:hover,:active):not(:disabled),.hero-demo:is(:hover,:active):not(:disabled),.workspace-panel .button:is(:hover,:active):not(:disabled),.sidebar-bottom .button:is(:hover,:active):not(:disabled),.button:active:not(:disabled),.hero-index-panel .detail-row:is(:hover,:focus-visible) svg{transform:none}
  .sidebar,.sidebar.open{transform:none}
+}
+
+/* Detail panels enter as one surface; the copy follows as a single group. */
+#detail-dialog[open]{animation:none;transform-origin:center 38%}
+#detail-dialog::backdrop{backdrop-filter:none;background:color-mix(in srgb,var(--text) 20%,transparent)}
+#detail-dialog[open]::backdrop{animation:detail-backdrop-enter 340ms ease-out both}
+#detail-dialog[open].is-closing::backdrop{animation:detail-backdrop-exit 180ms ease-in both}
+@keyframes detail-backdrop-enter{from{opacity:0}to{opacity:1}}
+@keyframes detail-backdrop-exit{from{opacity:1}to{opacity:0}}
+
+/* Keep mode selection and its compact apply action together. */
+.device-controls .field-row:has(#target-mode) .field-label{min-width:0;flex:0 0 auto}
+.device-controls .field-row:has(#target-mode) .inline-control{flex:1 1 auto;min-width:0;flex-wrap:nowrap}
+.device-controls #target-mode{flex:1 1 130px;width:130px;min-width:0}
+.device-controls .button[data-action="mode"]{flex:0 0 auto}
+.device-controls :is(.button[data-action="device-download"],.device-hold){width:104px;min-width:104px;height:44px;min-height:44px;flex:0 0 104px;padding:5px 8px;text-align:center;white-space:normal;line-height:1.2}
+.workspace-panel .device-hold{position:relative;isolation:isolate;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;background:var(--error-bg)!important;color:var(--error)!important;border-color:transparent}
+.workspace-panel .device-hold.is-armed{animation:device-hold-arm 260ms cubic-bezier(.16,1,.3,1)}
+@keyframes device-hold-arm{0%{transform:scale(.96);box-shadow:0 0 0 0 color-mix(in srgb,var(--error) 30%,transparent)}55%{transform:scale(1.015);box-shadow:0 0 0 3px color-mix(in srgb,var(--error) 18%,transparent)}100%{transform:scale(1);box-shadow:0 0 0 0 transparent}}
+.device-hold-content{position:relative;z-index:1;display:block;width:100%;text-align:center}
+.device-hold-fill{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;pointer-events:none;background:color-mix(in srgb,var(--error) 75%,var(--text));color:var(--card-fill);clip-path:inset(0 100% 0 0);transition:clip-path 180ms var(--motion-enter)}
+.device-hold-fill-content{display:block;width:100%;padding:5px 8px;text-align:center}
+.device-hold.is-holding .device-hold-fill{clip-path:inset(0 0 0 0);transition:clip-path 1000ms linear;will-change:clip-path}
+.device-hold.is-complete .device-hold-fill{clip-path:inset(0 0 0 0);transition:none}
+.workspace-panel .button.device-hold.is-holding{transform:scale(.97)}
+@media(prefers-reduced-motion:reduce){
+ #detail-dialog[open]::backdrop,#detail-dialog[open].is-closing::backdrop{animation:none}
+ .device-hold-fill,.device-hold.is-holding .device-hold-fill{transition:none;clip-path:inset(0 100% 0 0)}
+ .workspace-panel .device-hold.is-armed{animation:none}
+ .workspace-panel .device-hold.is-holding{transform:none}
 }

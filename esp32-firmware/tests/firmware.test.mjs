@@ -106,6 +106,10 @@ test('browser controller and GATT framing operate directly against the compiled 
   transport.writer={writeValueWithResponse:async bytes=>{d.process.stdin.write(bytes);}};
   const controller=new DeviceController();controller.transport=transport;controller.state='ready';
   await controller.authenticate();controller.status=await transport.request('status');
+  assert.equal((await controller.manualServo()).started,true);
+  assert.equal((await controller.manualPump(true)).pumpOn,true);
+  assert.equal(controller.status.manualPumpOn,true);
+  assert.equal((await controller.manualPump(false)).pumpOn,false);
   const result=await controller.upload(configuration());assert.equal(result.saved,true);assert.equal(controller.status.configRevision,1);
   assert.deepEqual(await controller.download(),configuration());await controller.operate('mode','PREPARE');
   assert.equal(controller.status.mode,'PREPARE');assert.deepEqual(await controller.readHistory(),[]);
@@ -153,6 +157,7 @@ test('viewer and operator credentials are enforced by the C++ endpoint',async t=
   assert.equal(controller.handshake.authorizationRole,'viewer');
   assert.equal((await transport.request('status')).authorizationRole,'viewer');
   await assert.rejects(transport.request('setConfiguration',{config:configuration()}),/仅允许读取/);
+  await assert.rejects(transport.request('manualPump',{on:true}),/仅允许读取/);
   assert.equal((await transport.request('stop')).stopped,true);
   controller.credential={deviceId:'NATIVE-C3',role:'operator',secret:operatorSecret};
   await controller.authenticate();

@@ -11,7 +11,7 @@ struct Host : sws::Platform {
   uint32_t time=100, counter=0;
   std::string persisted;
   std::string secret,operatorSecret,viewerSecret;
-  bool failSave=false, failErase=false, rebooted=false;
+  bool failSave=false, failErase=false, rebooted=false,manualPumpOn=false;
   uint32_t now() override {return time;}
   std::string randomToken() override {return std::string(24,'0')+sws::hex32(++counter);}
   std::string hash(const std::string& nonce) override {
@@ -30,8 +30,15 @@ struct Host : sws::Platform {
   bool save(const std::string& raw) override {if(failSave)return false;persisted=raw;return true;}
   bool erase() override {if(failErase)return false;persisted.clear();return true;}
   bool storageReady() override {return true;}
-  int runtimeRequest(const std::string& action,JsonVariantConst,JsonObject out,std::string&)override{
-    if(action!="stop")return 0;out["stopped"]=true;return 1;
+  void describe(JsonObject out)override{out["capabilities"].as<JsonArray>().add("manual-control");}
+  void runtimeStatus(JsonObject out)override{out["manualPumpOn"]=manualPumpOn;out["servoBusy"]=false;}
+  int runtimeRequest(const std::string& action,JsonVariantConst payload,JsonObject out,std::string& error)override{
+    if(action=="manualServo"){out["started"]=true;return 1;}
+    if(action=="manualPump"){
+      if(!payload["on"].is<bool>()){error="水泵命令缺少开关状态";return -1;}
+      manualPumpOn=payload["on"].as<bool>();out["pumpOn"]=manualPumpOn;return 1;
+    }
+    if(action!="stop")return 0;manualPumpOn=false;out["stopped"]=true;return 1;
   }
   void event(const char*) override {}
   void rebootAfterReply() override {rebooted=true;}

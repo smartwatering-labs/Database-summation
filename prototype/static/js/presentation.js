@@ -1,6 +1,20 @@
 import { icon } from './ui.js';
 const reduced=matchMedia('(prefers-reduced-motion: reduce)'),dialog=document.querySelector('#detail-dialog');
 const details=new Map();let returnFocus,oldOverflow='',closing=false,closeVersion=0;
+const motions=[];
+function cancelMotions(){while(motions.length)motions.pop().cancel();}
+function animateOpen(){
+ if(reduced.matches||typeof dialog.animate!=='function')return;
+ const play=(node,frames,options)=>{
+  const animation=node.animate(frames,{...options,fill:'both'});motions.push(animation);
+  animation.finished.then(()=>{const index=motions.indexOf(animation);if(index>=0){motions.splice(index,1);animation.cancel();}}).catch(()=>{});
+ };
+ play(dialog,[{opacity:0,transform:'translate3d(0,20px,0) scale(.976)'},{opacity:1,transform:'translate3d(0,0,0) scale(1)'}],{duration:420,easing:'cubic-bezier(.16,1,.3,1)'});
+ for(const [selector,delay] of [['.detail-heading',45],['#detail-title',70],['#detail-body',95]]){
+  const node=dialog.querySelector(selector);
+  if(node)play(node,[{opacity:0,transform:'translate3d(0,9px,0)'},{opacity:1,transform:'translate3d(0,0,0)'}],{duration:340,delay,easing:'cubic-bezier(.16,1,.3,1)'});
+ }
+}
 function disclosure(parent,nodes,title,label,id){
  const content=document.createElement('div');nodes.filter(Boolean).forEach(n=>content.append(n));details.set(id,{title,html:content.innerHTML});
  const button=document.createElement('button');button.type='button';button.className='button disclosure-button';button.dataset.detail=id;
@@ -19,13 +33,26 @@ function informationIndex(sections,label){
  panel.append(list);return panel;
 }
 function openDetails(id,trigger){
- const detail=details.get(id);if(!detail)return;returnFocus=trigger;closing=false;closeVersion++;dialog.classList.remove('is-closing');
+ const detail=details.get(id);if(!detail)return;returnFocus=trigger;closing=false;closeVersion++;cancelMotions();dialog.classList.remove('is-closing');
  document.querySelector('#detail-title').textContent=detail.title;const body=document.querySelector('#detail-body');body.innerHTML=detail.html;
- oldOverflow=document.body.style.overflow;document.body.style.overflow='hidden';dialog.showModal();
+ if(!dialog.open){oldOverflow=document.body.style.overflow;document.body.style.overflow='hidden';dialog.showModal();}
+ animateOpen();
 }
-export function closeDetails(){closeVersion++;if(dialog.open)dialog.close();}
-dialog.addEventListener('close',()=>{document.body.style.overflow=oldOverflow;if(returnFocus?.isConnected)returnFocus.focus({preventScroll:true});closing=false;dialog.classList.remove('is-closing');});
-function animatedClose(){if(closing)return;closing=true;if(reduced.matches){closeDetails();return;}const version=++closeVersion;dialog.classList.add('is-closing');dialog.animate([{opacity:1,transform:'translateY(0)'},{opacity:0,transform:'translateY(6px)'}],{duration:150,easing:'cubic-bezier(.7,0,.84,0)'}).finished.then(()=>{if(version===closeVersion)closeDetails();}).catch(()=>{});}
+export function closeDetails(){closeVersion++;cancelMotions();if(dialog.open)dialog.close();}
+dialog.addEventListener('close',()=>{cancelMotions();document.body.style.overflow=oldOverflow;if(returnFocus?.isConnected)returnFocus.focus({preventScroll:true});closing=false;dialog.classList.remove('is-closing');});
+function animatedClose(){
+ if(closing||!dialog.open)return;
+ closing=true;
+ if(reduced.matches||typeof dialog.animate!=='function'){closeDetails();return;}
+ const opacity=getComputedStyle(dialog).opacity,transform=getComputedStyle(dialog).transform;
+ cancelMotions();
+ const version=++closeVersion;dialog.classList.add('is-closing');
+ const animation=dialog.animate([{opacity,transform},{opacity:0,transform:'translate3d(0,10px,0) scale(.985)'}],{duration:190,easing:'cubic-bezier(.7,0,.84,0)',fill:'forwards'});
+ motions.push(animation);
+ animation.finished.then(()=>{if(version===closeVersion)closeDetails();}).catch(()=>{});
+}
+reduced.addEventListener('change',()=>{if(reduced.matches){cancelMotions();if(closing)closeDetails();}});
+addEventListener('pagehide',closeDetails);
 dialog.addEventListener('cancel',e=>{e.preventDefault();animatedClose();});
 dialog.addEventListener('click',e=>{const b=dialog.getBoundingClientRect();if(e.target.closest('[data-detail-close]')||(e.target===dialog&&(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)))animatedClose();});
 document.addEventListener('click',e=>{const trigger=e.target.closest('[data-detail]');if(trigger)openDetails(trigger.dataset.detail,trigger);});

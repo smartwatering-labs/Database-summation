@@ -22,7 +22,7 @@ const out=path.resolve('test-results/information-list');fs.mkdirSync(out,{recurs
     await page.keyboard.press('Escape');await page.locator('#detail-dialog').waitFor({state:'hidden'});assert.ok(await entry.evaluate(n=>document.activeElement===n),'closing details restores row focus');
    }
   }
-  await go('product');assert.deepEqual(await page.locator('.detail-row').evaluateAll(rows=>rows.map(r=>r.getAttribute('aria-label'))),['硬件结构','工作原理','情况需知','编译需知']);await page.getByRole('button',{name:'情况需知',exact:true}).click();assert.match(await page.locator('#detail-body').innerText(),/DISPLAY[\s\S]*PREPARE[\s\S]*LONGRUN/);await page.keyboard.press('Escape');await page.locator('#detail-dialog').waitFor({state:'hidden'});
+  await go('product');assert.deepEqual(await page.locator('.detail-row').evaluateAll(rows=>rows.map(r=>r.getAttribute('aria-label'))),['硬件结构','工作原理','情况需知','使用流程']);await page.getByRole('button',{name:'情况需知',exact:true}).click();assert.match(await page.locator('#detail-body').innerText(),/DISPLAY[\s\S]*PREPARE[\s\S]*LONGRUN/);await page.keyboard.press('Escape');await page.locator('#detail-dialog').waitFor({state:'hidden'});
   for(const [width,height] of [[320,740],[390,844],[768,900],[1024,768],[1440,1000],[1920,1080]]){
    await page.setViewportSize({width,height});
    for(const route of ['home','product']){
