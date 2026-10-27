@@ -15,7 +15,7 @@ constexpr size_t MAX_MESSAGE=8192, MAX_CONFIG=6144, FRAME_BYTES=120, MAX_PARTS=7
 constexpr uint32_t FRAME_TIMEOUT=20000, NONCE_TIMEOUT=30000, OP_TIMEOUT=30000;
 constexpr const char* PROTOCOL="SWS-BLE";
 constexpr const char* VERSION="1.0";
-constexpr const char* FW_VERSION="3.9.0";
+constexpr const char* FW_VERSION="3.10.0";
 inline std::string json(JsonVariantConst value) {std::string out;serializeJson(value,out);return out;}
 inline uint32_t crc32(const std::string& bytes) {
   uint32_t crc=0xffffffff;

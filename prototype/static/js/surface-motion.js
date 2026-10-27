@@ -1,6 +1,7 @@
 // Content reveal and panel docking share one clock. The stationary model is
 // defocused only below an open workspace panel.
 import { modelStage } from './model-stage.js';
+import { localize } from './i18n.js';
 const main=document.querySelector('#main'),stage=document.querySelector('#model-stage');
 const defocus=document.createElement('div'),stillCanvas=document.createElement('canvas');
 defocus.id='model-defocus';defocus.setAttribute('aria-hidden','true');
@@ -91,6 +92,7 @@ function bind(){
  if(toggle){
   toggle.setAttribute('aria-expanded',String(!!panelTarget));
   toggle.querySelector('span').textContent=panelTarget?'查看 3D 模型':page==='configure'?'返回配置面板':'返回硬件面板';
+  localize(toggle);
   toggle.classList.toggle('panel-return',!panelTarget);
  }
  paint();

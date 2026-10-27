@@ -1,4 +1,5 @@
 import { icon } from './ui.js';
+import { localize } from './i18n.js';
 const reduced=matchMedia('(prefers-reduced-motion: reduce)'),dialog=document.querySelector('#detail-dialog');
 const details=new Map();let returnFocus,oldOverflow='',closing=false,closeVersion=0;
 const motions=[];
@@ -35,6 +36,7 @@ function informationIndex(sections,label){
 function openDetails(id,trigger){
  const detail=details.get(id);if(!detail)return;returnFocus=trigger;closing=false;closeVersion++;cancelMotions();dialog.classList.remove('is-closing');
  document.querySelector('#detail-title').textContent=detail.title;const body=document.querySelector('#detail-body');body.innerHTML=detail.html;
+ localize(dialog);
  if(!dialog.open){oldOverflow=document.body.style.overflow;document.body.style.overflow='hidden';dialog.showModal();}
  animateOpen();
 }
@@ -82,7 +84,7 @@ export function enhancePage(main,route){
  const index=informationIndex(Array.from(main.querySelectorAll('[data-detail-section]')),route==='home'?'从这里开始':'了解产品');
  const visual=document.createElement('figure');visual.className='hero-visual-region';
  visual.setAttribute('aria-label',route==='home'?'浇水设备完整外观':'顶盖、上层主板、下层主板与底壳的分解视图');
- visual.innerHTML=`<div class="model-state" role="status"><span class="model-state-loading">正在呈现设备模型</span><span class="model-state-error">暂时无法显示模型，刷新页面可重试。</span></div>`+(route==='home'?'<figcaption><span>双层结构 · 蓝牙配置 · 独立运行</span></figcaption>':'');
+ visual.innerHTML=`<div class="model-state" role="status"><span class="model-state-loading">正在呈现设备模型</span><span class="model-state-error">暂时无法显示模型，刷新页面可重试。</span></div>`;
  if(route==='home'){
   const heading=main.querySelector('.home-heading');heading.classList.add('hero-copy');
   const stack=document.createElement('aside');stack.className='hero-side-stack';stack.setAttribute('aria-label','开始使用');

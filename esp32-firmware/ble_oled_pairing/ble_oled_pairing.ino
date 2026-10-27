@@ -35,7 +35,7 @@ struct RxChunk {uint32_t epoch;uint16_t size;uint8_t bytes[244];};
 QueueHandle_t rxQueue=nullptr;
 std::deque<std::string> tx;
 size_t txOffset=0,txBytes=0,rxCount=0,rxTotal=0;
-uint32_t lastEpoch=0,nextTx=0,txBlockedAt=0,stageAt=0,savedAt=0,lastDisplay=0,rebootAt=0;
+uint32_t lastEpoch=0,nextTx=0,txBlockedAt=0,stageAt=0,savedAt=0,lastDisplay=0,rebootAt=0,lastAdvertisingCheck=0;
 bool oledReady=false,rebootPending=false,hasSavedNotice=false;
 // A host keys its bond to the peer address, so a stale record can only be escaped by
 // publishing a new address. Bump this value to give the board a brand-new identity.
@@ -54,11 +54,34 @@ class Hardware : public sws::Platform {
   std::string deviceIdentity;
   bool ready=false;
 public:
+  // Set when an older firmware's owner key was cleared on this boot; setup() then
+  // drops the matching BLE bonds so a stale host pairing cannot shadow the link.
+  bool legacySecurityReset=false;
   static bool validKey(const std::string& value){return value.size()==64&&value.find_first_not_of("0123456789abcdef")==std::string::npos;}
-  void begin(){ready=prefs.begin("watercfg",false);if(identity.begin("waterauth",false)){
+  void begin(){
+    ready=prefs.begin("watercfg",false);bool identityReady=identity.begin("waterauth",false);
+#if SWS_AUTH_MODE
+    if(identityReady){
       key=identity.getString("key").c_str();operatorKey=identity.getString("operator").c_str();viewerKey=identity.getString("viewer").c_str();}
-    if(!validKey(key))key.clear();if(!validKey(operatorKey))operatorKey.clear();if(!validKey(viewerKey))viewerKey.clear();}
-  const char* authProfile()override{return key.empty()?"development":"hmac-sha256-v1";}
+    if(!validKey(key))key.clear();if(!validKey(operatorKey))operatorKey.clear();if(!validKey(viewerKey))viewerKey.clear();
+#else
+    // Open mode never uses a key. A key written by an older firmware lives in NVS and
+    // survives reflashing, which would keep the write characteristic behind link
+    // encryption forever. Clear it exactly once so every shipped board connects.
+    (void)identityReady;
+    if(identityReady&&!identity.getBool("openModeV1",false)){
+      identity.remove("key");identity.remove("operator");identity.remove("viewer");
+      identity.putBool("openModeV1",true);legacySecurityReset=true;
+    }
+#endif
+  }
+  const char* authProfile()override{
+#if SWS_AUTH_MODE
+    return key.empty()?"development":"hmac-sha256-v1";
+#else
+    return "development";
+#endif
+  }
   bool hasRole(const std::string& role)override{return role=="owner"?!key.empty():role=="operator"?!operatorKey.empty():role=="viewer"?!viewerKey.empty():false;}
   void setIdentity(const std::string& id){deviceIdentity=id;}
   std::string secureMac(const std::string& message)override{
@@ -97,6 +120,7 @@ public:
       Serial.println(cleared?"KEY_CLEARED reboot_to_apply":"KEY_CLEAR_FAILED");
       return true;
     }
+#if SWS_AUTH_MODE
     if(line.rfind("AUTHSTATUS ",0)==0){std::string role=line.substr(11);
       if(role!="owner"&&role!="operator"&&role!="viewer")Serial.println("AUTH_INVALID");
       else Serial.printf("AUTHSTATUS %s %d\n",role.c_str(),hasRole(role)?1:0);
@@ -116,6 +140,12 @@ public:
     if(identity.putString(storage,candidate.c_str())!=candidate.size()||identity.getString(storage).c_str()!=candidate){Serial.println("AUTH_SAVE_FAILED");return true;}
     if(role=="owner")key=candidate;else if(role=="operator")operatorKey=candidate;else viewerKey=candidate;
     Serial.println("AUTH_PROVISIONED");return true;
+#else
+    // Open mode has no owner key: refuse provisioning instead of silently creating a
+    // state that would lock the next connection out of the write characteristic.
+    if(line.rfind("AUTH",0)==0){Serial.println("AUTH_DISABLED open-mode");return true;}
+    return false;
+#endif
   }
   uint32_t now() override{return millis();}
   std::string randomToken() override {char out[33];for(int i=0;i<16;i++)snprintf(out+2*i,3,"%02x",uint8_t(esp_random()));return out;}
@@ -220,18 +250,19 @@ void drawDisplay(uint32_t now){
 
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* s,NimBLEConnInfo& info) override {
-    Serial.printf("BLE_CONNECTED handle=%u\n",info.getConnHandle());
-    // `linked` can outlive its link: a disconnect that reports another handle
-    // used to leave it set, which then rejected every later central. Reconcile
-    // with the controller before trusting the flag.
-    if(linked.load()&&s->getConnectedCount()<=1){linked=false;subscribed=false;peer=BLE_HS_CONN_HANDLE_NONE;}
-    if(linked.exchange(true)){s->disconnect(info.getConnHandle());return;}
-    peer=info.getConnHandle();subscribed=false;epoch.fetch_add(1);
-    // The write characteristic requires link encryption, and hosts do not pair just
-    // because a write is refused. Ask for security as soon as the link is up so the
-    // pairing finishes before the page writes its first packet.
+    uint16_t handle=info.getConnHandle();
+    Serial.printf("BLE_CONNECTED handle=%u\n",handle);
+    // Last central wins. A phone or tablet may still hold the old link while the next
+    // customer connects from another browser; drop the old one instead of refusing
+    // the new connection.
+    uint16_t previous=peer.load();
+    if(previous!=BLE_HS_CONN_HANDLE_NONE&&previous!=handle)s->disconnect(previous);
+    peer=handle;subscribed=false;linked=true;epoch.fetch_add(1);
+    // Only the keyed profile behind SWS_AUTH_MODE=1 needs link encryption. In the
+    // default open profile this stays false, so the write characteristic accepts the
+    // handshake from any host without pairing.
     securityPending=std::string(hardware.authProfile())=="hmac-sha256-v1";
-    s->updateConnParams(info.getConnHandle(),12,24,0,500);
+    s->updateConnParams(handle,12,24,0,500);
   }
   void onDisconnect(NimBLEServer* s,NimBLEConnInfo& info,int reason) override {
     Serial.printf("BLE_DISCONNECTED handle=%u reason=%d\n",info.getConnHandle(),reason);
@@ -251,7 +282,9 @@ class NotifyCallbacks : public NimBLECharacteristicCallbacks {
 };
 class WriteCallbacks : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c,NimBLEConnInfo& info) override {
-    if(info.getConnHandle()!=peer.load()||!subscribed.load())return;
+    // Accept a write before the notifications subscription is registered: some hosts
+    // write their first frame as soon as the characteristics are resolved.
+    if(info.getConnHandle()!=peer.load())return;
     auto value=c->getValue();RxChunk chunk{};
     if(value.size()==1&&value[0]=='!'){immediateStop=true;return;}
     if(value.size()>sizeof(chunk.bytes)){rxOverflow=true;return;}
@@ -283,7 +316,18 @@ void setup(){
   if(oledReady){display.setI2CAddress(SWS_OLED_ADDRESS<<1);display.begin();display.setBusClock(400000);}
   Serial.printf("SWS %s device=%s OLED=%s I2C=%d/%d address=0x%02x\n",sws::FW_VERSION,id,oledReady?"found":"missing",SWS_OLED_SDA,SWS_OLED_SCL,SWS_OLED_ADDRESS);
   rxQueue=xQueueCreate(64,sizeof(RxChunk));if(!rxQueue){hardware.event("error");return;}
+#if !SWS_AUTH_MODE
+  if(hardware.legacySecurityReset){
+    // Purge the stored peer keys before the BLE stack loads them: a host that still
+    // holds the old bond would otherwise start encryption with a key this board no
+    // longer keeps and hang up before the open profile can answer.
+    Preferences bonds;if(bonds.begin("nimble_bond",false)){bonds.clear();bonds.end();}
+  }
+#endif
   if(!NimBLEDevice::init("SWS-ESP32C3")){Serial.println("BLE_INIT_FAILED");hardware.event("error");return;}
+#if !SWS_AUTH_MODE
+  if(hardware.legacySecurityReset){NimBLEDevice::deleteAllBonds();Serial.println("AUTH_RESET legacy-security-cleared profile=development");}
+#endif
   // A host keys its bond to the peer address, so one stale record in the computer
   // shadows the link for good: it keeps encrypting with a key this device no longer
   // has and hangs up (reason 0x13) before pairing can start. A fixed static random
@@ -299,10 +343,12 @@ void setup(){
       Serial.printf("BLE_ADDR %02x:%02x:%02x:%02x:%02x:%02x random-static\n",own[5],own[4],own[3],own[2],own[1],own[0]);
     else Serial.println("BLE_ADDR public");
   }
+#if SWS_AUTH_MODE
   if(std::string(hardware.authProfile())=="hmac-sha256-v1"){
     NimBLEDevice::setSecurityAuth(true,false,true);
     NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
   }
+#endif
   Serial.printf("BLE_SECURITY profile=%s bonds=%d\n",hardware.authProfile(),NimBLEDevice::getNumBonds());
   server=NimBLEDevice::createServer();server->setCallbacks(&serverCallbacks,false);
   auto* service=server->createService(SWS_SERVICE_UUID);
@@ -315,8 +361,10 @@ void setup(){
 }
 void loop(){
   uint32_t now=millis(),currentEpoch=epoch.load();
-  if(currentEpoch!=lastEpoch){lastEpoch=currentEpoch;receiver.reset();endpoint->resetSession();clearTx();rxCount=rxTotal=0;
-    if(!linked.load())boardRuntime.manualPumpOff("manual-pump-disconnected");
+  if(currentEpoch!=lastEpoch){lastEpoch=currentEpoch;receiver.reset();endpoint->resetSession();clearTx();rxCount=rxTotal=0;if(rxQueue)xQueueReset(rxQueue);
+    // Any new link takes over the previous session, so a manual pump started by the
+    // old central must not keep running for the new one.
+    boardRuntime.manualPumpOff(linked.load()?"manual-pump-takeover":"manual-pump-disconnected");
     hardware.event(linked.load()?"connected":"disconnected");if(!linked.load()&&server&&!rebootPending)NimBLEDevice::startAdvertising();}
   if(rxOverflow.exchange(false)){receiver.reset();clearTx();rxCount=rxTotal=0;hardware.event("error");terminateLink();}
   if(securityPending.exchange(false)&&linked.load()&&peer.load()!=BLE_HS_CONN_HANDLE_NONE){
@@ -336,6 +384,12 @@ void loop(){
   now=millis();
   receiver.tick(now);sendNext(now);drawDisplay(now);
   boardRuntime.tick(now,linked.load(),tx.empty());
+  if(!linked.load()&&server&&!rebootPending&&uint32_t(now-lastAdvertisingCheck)>=5000){
+    // A controller can stop advertising after an unusual disconnect sequence. Re-arm
+    // it from the main loop so the board stays discoverable without a power cycle.
+    lastAdvertisingCheck=now;auto* advertising=NimBLEDevice::getAdvertising();
+    if(advertising&&!advertising->isAdvertising())Serial.println(advertising->start()?"BLE_READVERTISING":"BLE_ADVERTISING_FAILED");
+  }
   if(rebootPending&&((tx.empty()&&uint32_t(now-rebootAt)>500)||uint32_t(now-rebootAt)>10000))ESP.restart();
   delay(2);
 }

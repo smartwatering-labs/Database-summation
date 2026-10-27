@@ -1,3 +1,5 @@
+import { translateText } from './i18n.js';
+
 export function escape(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char])); }
 export const modes = { DISPLAY: '展示 / 调试', PREPARE: '准备 / 采样', LONGRUN: '长期运行' };
 export const connectionPhases = {
@@ -57,9 +59,9 @@ export function drawChart(canvas, samples, threshold = 50) {
     ctx.setLineDash([4, 4]); ctx.strokeStyle = '#a88757'; ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke(); ctx.setLineDash([]);
   }
   const points = samples.filter(s => Number.isFinite(s.wateringDemand));
-  if (!points.length) { ctx.fillStyle = '#666'; ctx.fillText('暂无有效需求值', left + 10, height / 2); return; }
+  if (!points.length) { ctx.fillStyle = '#666'; ctx.fillText(translateText('暂无有效需求值'), left + 10, height / 2); return; }
   ctx.strokeStyle = '#111'; ctx.lineWidth = 2; ctx.beginPath();
   points.forEach((s, i) => { const x = left + (right - left) * i / Math.max(1, points.length - 1), y = bottom - (bottom - top) * s.wateringDemand / 100; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
   const last = points.at(-1); ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(points.length === 1 ? left : right, bottom - (bottom - top) * last.wateringDemand / 100, 3, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#777'; ctx.fillText('较早采样', left, height - 7); ctx.textAlign = 'right'; ctx.fillText('最新采样', right, height - 7); ctx.textAlign = 'left';
+  ctx.fillStyle = '#777'; ctx.fillText(translateText('较早采样'), left, height - 7); ctx.textAlign = 'right'; ctx.fillText(translateText('最新采样'), right, height - 7); ctx.textAlign = 'left';
 }

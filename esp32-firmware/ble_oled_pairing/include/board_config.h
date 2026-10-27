@@ -16,6 +16,16 @@
 #ifndef SWS_DEVICE_SECRET
 #define SWS_DEVICE_SECRET "SWS2026C3" // Public development profile, matches browser.
 #endif
+// 0: open profile (default). The write characteristic accepts plain writes, no
+//    pairing and no credential are needed, so any browser that supports Web
+//    Bluetooth can connect to any board. A key left in NVS by an older firmware is
+//    cleared once on the first boot.
+// 1: per-device owner key. The write characteristic requires link encryption, the
+//    page must pair through the operating system and import the matching owner
+//    credential. Build with -DSWS_AUTH_MODE=1 for deployments that need it.
+#ifndef SWS_AUTH_MODE
+#define SWS_AUTH_MODE 0
+#endif
 constexpr char SWS_SERVICE_UUID[] = "2d26a7cc-1d45-4eae-9280-2a97346fd001";
 constexpr char SWS_WRITE_UUID[] = "2d26a7cc-1d45-4eae-9280-2a97346fd002";
 constexpr char SWS_NOTIFY_UUID[] = "2d26a7cc-1d45-4eae-9280-2a97346fd003";

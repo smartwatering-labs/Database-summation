@@ -276,6 +276,7 @@ document.addEventListener('keydown',event=>{
 function openDialog(title, content, submit, label='确认') {
   dialogSubmit=submit;
   document.querySelector('#dialog-content').innerHTML=`<form id="dialog-form" autocomplete="off"><div class="dialog-heading"><h2 id="dialog-title">${e(title)}</h2><button type="button" class="button ghost icon-button" data-action="close-dialog" aria-label="关闭对话框">${icon('close')}</button></div>${content}<div class="form-error" id="dialog-error" role="alert"></div><div class="dialog-actions">${button('取消','close-dialog',{type:'outline',extra:'type="button"'})}<button type="submit" class="button primary">${e(label)}</button></div></form>`;
+  localize(dialog);
   dialog.showModal();
 }
 function confirmAction(title, description, operation, requiredText='') {
@@ -294,7 +295,7 @@ function connectionDialog() {
   openDialog('连接浇水设备',`<p class="dialog-description">请按外置按钮唤醒 ESP32-C3，并打开电脑或手机蓝牙；浏览器会让你选择设备</p>
   <div class="notice">连接设置与导入凭据仅在当前标签页会话内保留，供刷新后恢复连接；生成的配置仍在刷新后清除</div>
   ${['serviceUuid','writeUuid','notifyUuid'].map((key,i)=>`<label class="dialog-field">${['BLE 服务 UUID','写入特征 UUID','通知特征 UUID'][i]}<input name="${key}" value="${e(ble[key]||'')}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"></label>`).join('')}
-  <label class="dialog-field">设备密钥凭据（已供应密钥的设备需导入）<input type="file" name="credentialFile" accept=".json,application/json"></label>
+  <label class="dialog-field">设备密钥凭据（已供应密钥的设备需导入）<span class="file-picker"><input type="file" name="credentialFile" accept=".json,application/json"><span class="button outline file-picker-trigger" aria-hidden="true">选择文件</span><span class="file-picker-name" aria-hidden="true">未选择文件</span></span></label>
   ${ble.credential?`<p class="caption muted">本页已载入 ${e(ble.credential.deviceId)} 的凭据；当前标签页刷新后可恢复。</p>`:''}
   <p class="caption muted">SWS-BLE 1.0 · JSON 分包传输；页面不支持远程唤醒设备</p>${device.state==='ready'?button('断开当前连接','disconnect',{type:'outline',extra:'type="button"'}):''}`,async form=>{
     const data=new FormData(form),file=form.elements.credentialFile.files[0];
@@ -302,9 +303,10 @@ function connectionDialog() {
     for(const key of ['serviceUuid','writeUuid','notifyUuid'])state.settings.ble[key]=data.get(key);
     dialog.close(); resetDeviceView(); await device.connect(state.settings.ble,false,{remember:true}); toast('设备连接与握手成功');render();
   },'选择并连接设备');
-  const fileInput=dialog.querySelector('[name="credentialFile"]'),submit=dialog.querySelector('#dialog-form button[type="submit"]'),error=dialog.querySelector('#dialog-error');
+  const fileInput=dialog.querySelector('[name="credentialFile"]'),fileName=dialog.querySelector('.file-picker-name'),submit=dialog.querySelector('#dialog-form button[type="submit"]'),error=dialog.querySelector('#dialog-error');
   fileInput.addEventListener('change',async()=>{
     const file=fileInput.files[0];selectedCredential=null;error.textContent='';submit.disabled=!!file;
+    fileName.setAttribute('translate',file?'no':'yes');fileName.textContent=file?file.name:'未选择文件';localize(fileName);
     if(!file)return;
     try{
       if(file.size>4096)throw new Error('设备凭据文件超过 4 KB');

@@ -56,6 +56,7 @@ export class DeviceController extends EventTarget {
     finally { if (this.isSession(session)) { this.busy = false; this.connectionPhase = null; this.emit(); } }
   }
   friendly(error) {
+    if (/Insufficient Authentication|Insufficient Encryption|NOT_AUTHORIZED|not authorized/i.test(error.message || '')) return '设备要求加密链路但系统尚未完成配对：请在系统蓝牙设置中删除该设备记录后重新连接';
     if (/Connection already in progress|GATT operation.*progress/i.test(error.message || '')) return '蓝牙仍在处理连接请求，请稍后重试';
     if (/GATT.*disconnect/i.test(error.message || '') || error.name === 'NetworkError') return '蓝牙在连接初始化时断开，请保持设备供电后重试';
     if (error.name === 'NotFoundError') return '未选择设备或未发现可用设备，请确认已按外置按钮唤醒';

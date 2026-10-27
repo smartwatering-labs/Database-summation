@@ -11,9 +11,9 @@ const translations = [
   ['未连接','Disconnected'],['尚未连接设备','No device connected'],['正在连接','Connecting'],['正在握手','Handshaking'],['模拟设备 · 已连接','Demo device · Connected'],['设备已连接','Device connected'],['连接失败','Connection failed'],['连接管理','Manage connection'],['连接设备','Connect device'],['ESP32-C3 · 配置平台','ESP32-C3 · Configuration platform'],
   ['打开导航','Open navigation'],['收起侧边栏','Collapse sidebar'],['展开侧边栏','Expand sidebar'],['主导航','Main navigation'],['关闭详情','Close details'],['此应用需要启用 JavaScript 才能进行配置和蓝牙连接','Enable JavaScript to configure and connect to the device'],
   ['正在准备工作区','Preparing workspace'],['读取植物与地点知识库…','Loading plant and location data…'],['工作区暂时无法加载','Workspace could not load'],['重新加载','Reload'],
-  ['呵护植物','Care for plants'],['及人之所不能及','Beyond human reach'],['客制化植物灌溉方案','Tailored plant irrigation'],['为每一种植物提供独到环境','A considered environment for every plant'],['连接浇水设备','Connect watering device'],['查看设备状态','View device status'],['生成个性化配置','Create a personal configuration'],['连接模拟设备','Connect demo device'],
+  ['呵护植物','Care for plants'],['及人之所不能及','Beyond human reach'],['客制化植物灌溉方案','Tailored plant irrigation'],['为每一种植物提供独到环境','A considered environment for every plant'],['连接浇水设备','Connect watering device'],['查看设备状态','View device status'],['生成个性化配置','Create personal configuration'],['连接模拟设备','Connect demo device'],
   ['数据处理','Data processing'],['我们是怎么生成客制化方案的，你的数据上传后会怎么样','How we tailor a plan and handle the data you send'],['编译须知','Configuration notes'],['在客制化时，设备如何进行通讯和编译','How the device communicates and receives your configuration'],['报错处理','Troubleshooting'],['不同的报错信号意味着什么？','What do the different error signals mean?'],
-  ['双层结构 · 蓝牙配置 · 独立运行','Two-board design · Bluetooth setup · Independent operation'],['正在呈现设备模型','Loading the device model'],['暂时无法显示模型，刷新页面可重试。','The model could not load. Refresh to try again.'],['浇水系统展示','Watering system overview'],['开始使用','Get started'],['从这里开始','Start here'],['浇水设备完整外观','Complete device assembly'],
+  ['正在呈现设备模型','Loading the device model'],['暂时无法显示模型，刷新页面可重试。','The model could not load. Refresh to try again.'],['浇水系统展示','Watering system overview'],['开始使用','Get started'],['从这里开始','Start here'],['浇水设备完整外观','Complete device assembly'],
   ['设备设计','Device design'],['为什么值得信赖','Why it earns trust'],['从里到外，对其设计进行了解','Explore the design from the inside out'],['创建适合你的配置','Create setup'],['查看硬件情况','Device status'],['硬件结构','Hardware structure'],['外壳设计与内部功能设计','Enclosure and internal function'],['工作原理','How it works'],['机器的自动化依据与实现逻辑','The logic behind autonomous operation'],['情况需知','What to know'],['机器为什么会报错，可能的归因是什么？','Why errors occur and what may cause them'],['使用流程','Usage flow'],['使用设备具体流程','The steps for putting the device to use'],['产品介绍与使用说明','Product and usage guide'],['了解产品','Explore the product'],['顶盖、上层主板、下层主板与底壳的分解视图','Exploded view of the lid, two boards, and lower shell'],
   ['数据从填写开始，从本地发送到浏览器和设备。','Data starts with what you enter and travels from the local service to the browser and the device.'],['基础信息输入','Basic inputs'],['输入植物、地点、栽培方式、光照与水源等基础信息，并根据外部 API 自动查询天气。','Enter plant, location, cultivation method, light, and water source, and the weather is queried automatically through an external API.'],['本地换算','Local conversion'],['按照植物与地点知识库换算参数，生成一份临时配置，再由浏览器校验格式与范围。','Plant and location references are converted into parameters to produce a temporary configuration, which the browser then validates for format and range.'],['留存写入','Saved after writing'],['配置经蓝牙写入 ESP32-C3，由设备保存后独立运行，页面上的需求曲线只留在本地。','The configuration goes to the ESP32-C3 over Bluetooth, and the device runs on its own once saved. The demand chart stays on this machine.'],['看设备如何使用这份配置 →','See how the device uses this configuration →'],
   ['配置不进入网站数据库；模拟设备只做演示，不会写入真实硬件。设备版本与能力以握手结果为准。','Configuration never enters the site database. Demo mode is for exploration only and never writes to real hardware. The handshake confirms the device version and capabilities.'],
@@ -128,6 +128,26 @@ translations.push(
   ['设备尚未提供采样；等待下次采样后刷新','No sample has arrived yet. Refresh after the next reading.'],
 );
 translations.push(...[["这是初始建议值，启用长期运行前请核对传感器读数和实际出水","These are starting values. Check sensor readings and water output before long-term operation."],["最短浇水间隔已写入控制参数；自动运行须由支持 2.0 配置的固件执行，并通过传感器及运行保护检查","The minimum interval is included in the control settings. Automatic operation requires firmware with configuration 2.0 support and successful sensor and operating checks."],["设备固定无人值守，触发阈值增加 3；首次配置推荐先进入 PREPARE 采样","The unattended setting adds 3 to the trigger threshold. Start the first setup with PREPARE sampling."],["请先完成设备校时与十分钟准备期","Complete device time sync and the ten-minute preparation period first."]]);
+translations.push(
+  ['配置平台','Configuration platform'],
+  ['硬件模型','Hardware model'],['返回硬件面板','Return to device panel'],
+  ['选择文件','Choose file'],['未选择文件','No file selected'],
+  ['请等待设备凭据读取完成','Wait for the device credentials to finish loading'],
+  ['使用近期有效读数','Using a recent valid reading'],['读取失败','Reading failed'],
+  ['超出有效范围','Outside the valid range'],['超范围或读数突变','Out of range or abrupt change'],
+  ['主动改变输入后三次读数未变化','No change across three readings after the input changed'],
+  ['检查共用传感器供电与接线','Check shared sensor power and wiring'],
+  ['输入电压超出量程','Input voltage is outside the measurement range'],
+  ['日志或检查点存储未就绪','Log or checkpoint storage is not ready'],
+  ['需要写入绑定本机的 2.0 配置','Write a device-bound 2.0 configuration first'],
+  ['需要校时','Time sync required'],['采样已过期','Sample expired'],
+  ['土壤通道无效','Invalid soil channel'],['雨量通道无效','Invalid rain channel'],
+  ['温湿度通道无效','Invalid temperature or humidity channel'],
+  ['等待最短浇水间隔','Waiting for the minimum watering interval'],
+  ['已由用户停止','Stopped by the user'],
+  ['浇水前检查点保存失败','Failed to save the pre-watering checkpoint'],
+  ['运行记录保存失败','Failed to save the operating log'],
+);
 const dictionary = new Map(translations);
 const substitutions = [...dictionary].filter(([zh]) => (zh.match(/[\u3400-\u9fff]/gu)||[]).length>=2).sort((a,b) => b[0].length-a[0].length);
 const originals = new WeakMap();
@@ -147,7 +167,7 @@ export function translateText(value) {
     [/^已读取\s*(\d+)\s*条近期记录$/u,'Read $1 recent records'],
   ];
   for(const [pattern,replacement] of patterns)if(pattern.test(trimmed))return value.replace(trimmed,trimmed.replace(pattern,replacement));
-  let result=value;
+  let result=value.replace(/第\s*(\d+)\s*次唤醒/gu,'Wake $1');
   for (const [zh,en] of substitutions) if (result.includes(zh)) result=result.replaceAll(zh,en);
   result=result.replace(/(\d+)\s*次/gu,'$1 times').replace(/(\d+)\s*小时/gu,'$1 hours').replace(/(\d+)\s*分钟/gu,'$1 minutes').replace(/(\d+)\s*天/gu,'$1 days');
   result=result.replace(/(Less than 1 minute|\d+ (?:minutes|hours|days))前/gu,'$1 ago');
